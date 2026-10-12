@@ -1,3 +1,4 @@
 /target
 /crates/*/tests/snapshots/*.diff.png
 /crates/*/tests/snapshots/*.new.png
+/dist

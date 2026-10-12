@@ -12,3 +12,22 @@ manageriliki-core = { version = "0.1.0", path = "../core" }
 
 [dev-dependencies]
 egui_kittest = { version = "0.36.2", features = ["eframe", "wgpu", "snapshot"] }
+
+[package.metadata.deb]
+name = "manageriliki-gui"
+maintainer = "Polychronis Stamoulis <poler2860@gmail.com>"
+copyright = "2026, Polychronis Stamoulis"
+section = "admin"
+priority = "optional"
+extended-description = """\
+Desktop app to manage servers on the local network over SSH, RS232 serial \
+and VNC (direct or tunneled through SSH), with built-in user accounts, \
+roles and an audit log."""
+# Windowing and GL libraries are loaded at runtime, so $auto cannot see them.
+depends = "$auto, libgl1, libegl1, libxkbcommon0, libxkbcommon-x11-0, libwayland-client0, libx11-xcb1, libxcursor1, libxi6, libxrandr2"
+assets = [
+    ["target/release/manageriliki-gui", "usr/bin/", "755"],
+    ["../../packaging/manageriliki.desktop", "usr/share/applications/", "644"],
+    ["../../packaging/manageriliki.svg", "usr/share/icons/hicolor/scalable/apps/", "644"],
+    ["../../README.md", "usr/share/doc/manageriliki-gui/README.md", "644"],
+]

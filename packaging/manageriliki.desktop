@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=manageriliki
+GenericName=Server Manager
+Comment=Manage local servers over SSH, serial and VNC
+Exec=manageriliki-gui
+Icon=manageriliki
+Terminal=false
+Categories=System;Network;RemoteAccess;
+Keywords=ssh;serial;rs232;vnc;server;console;
+StartupWMClass=manageriliki

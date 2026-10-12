@@ -10,3 +10,19 @@ chrono = "0.4.45"
 crossterm = "0.29.0"
 manageriliki-core = { version = "0.1.0", path = "../core" }
 ratatui = "0.30.2"
+
+[package.metadata.deb]
+name = "manageriliki-tui"
+maintainer = "Polychronis Stamoulis <poler2860@gmail.com>"
+copyright = "2026, Polychronis Stamoulis"
+section = "admin"
+priority = "optional"
+extended-description = """\
+Manage servers on the local network over SSH and RS232 serial from a \
+terminal UI, with built-in user accounts, roles and an audit log. \
+The graphical VNC viewer is in the manageriliki-gui package."""
+depends = "$auto"
+assets = [
+    ["target/release/manageriliki-tui", "usr/bin/", "755"],
+    ["../../README.md", "usr/share/doc/manageriliki-tui/README.md", "644"],
+]
