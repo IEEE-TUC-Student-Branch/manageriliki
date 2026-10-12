@@ -1,5 +1,6 @@
 mod editors;
 mod term_widget;
+mod vnc_view;
 #[cfg(test)]
 mod tests;
 
@@ -8,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use eframe::egui::{self, Color32, RichText, Ui};
 use editors::{PasswordDialog, ServerEditor, UserEditor};
+use vnc_view::VncView;
 use manageriliki_core::{
     AuditEntry, CommandOutput, Identity, Manager, Result as CoreResult, Role, Server, Status,
     StatusMonitor, Terminal, TransportKind, User,
@@ -221,6 +223,7 @@ struct MainUi {
     filter: String,
     monitor: StatusMonitor,
     sessions: Vec<Session>,
+    displays: Vec<VncView>,
     next_session_id: u64,
     server_editor: Option<ServerEditor>,
     user_editor: Option<UserEditor>,
@@ -244,6 +247,7 @@ impl MainUi {
             audit: Vec::new(),
             filter: String::new(),
             sessions: Vec::new(),
+            displays: Vec::new(),
             next_session_id: 0,
             server_editor: None,
             user_editor: None,
@@ -310,6 +314,17 @@ impl MainUi {
         }
     }
 
+    fn open_vnc(&mut self, server: &Server) {
+        let repaint = self.ctx.clone();
+        match self.mgr.open_vnc(&self.who, server.id, Arc::new(move || repaint.request_repaint())) {
+            Ok(session) => {
+                self.next_session_id += 1;
+                self.displays.push(VncView::new(self.next_session_id, session));
+            }
+            Err(e) => self.error(e),
+        }
+    }
+
     fn show(&mut self, ui: &mut Ui) -> MainOutcome {
         let mut outcome = MainOutcome::Stay;
         let ctx = ui.ctx().clone();
@@ -356,7 +371,7 @@ impl MainUi {
                             RichText::new(format!(
                                 "{} server(s) · {} open session(s)",
                                 self.servers.len(),
-                                self.sessions.len()
+                                self.sessions.len() + self.displays.len()
                             ))
                             .weak(),
                         );
@@ -414,8 +429,8 @@ impl MainUi {
         }
 
         egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
-            egui::Grid::new("servers").striped(true).num_columns(6).spacing([14.0, 8.0]).show(ui, |ui| {
-                for h in ["", "Name", "Group", "SSH", "Serial", "Actions"] {
+            egui::Grid::new("servers").striped(true).num_columns(7).spacing([14.0, 8.0]).show(ui, |ui| {
+                for h in ["", "Name", "Group", "SSH", "Serial", "VNC", "Actions"] {
                     ui.label(RichText::new(h).strong());
                 }
                 ui.end_row();
@@ -440,6 +455,7 @@ impl MainUi {
                     ui.label(&s.group);
                     ui.label(s.ssh.as_ref().map(|c| format!("{}@{}:{} ({})", c.username, c.host, c.port, c.auth.label())).unwrap_or_else(|| "—".into()));
                     ui.label(s.serial.as_ref().map(|c| c.summary()).unwrap_or_else(|| "—".into()));
+                    ui.label(s.vnc.as_ref().map(|c| c.summary(s.ssh.as_ref())).unwrap_or_else(|| "—".into()));
                     ui.horizontal(|ui| {
                         let connect = self.can_connect(s);
                         if ui.add_enabled(connect && s.ssh.is_some(), egui::Button::new("SSH")).clicked() {
@@ -447,6 +463,9 @@ impl MainUi {
                         }
                         if ui.add_enabled(connect && s.serial.is_some(), egui::Button::new("Serial")).clicked() {
                             self.open_session(s, TransportKind::Serial);
+                        }
+                        if ui.add_enabled(connect && s.vnc.is_some(), egui::Button::new("VNC")).clicked() {
+                            self.open_vnc(s);
                         }
                         if ui.add_enabled(connect && s.ssh.is_some(), egui::Button::new("Run…")).clicked() {
                             self.command = Some(CommandDialog {
@@ -568,6 +587,20 @@ impl MainUi {
         }
         // Dropping a Terminal disconnects it.
         self.sessions.retain(|s| s.open);
+
+        for view in &mut self.displays {
+            let mut open = view.open;
+            egui::Window::new(view.session.title.clone())
+                .id(egui::Id::new(("display", view.id)))
+                .open(&mut open)
+                .default_size([960.0, 600.0])
+                .min_size([320.0, 200.0])
+                .resizable(true)
+                .collapsible(true)
+                .show(ctx, |ui| view.show(ui));
+            view.open = open;
+        }
+        self.displays.retain(|d| d.open);
     }
 
     fn dialogs(&mut self, ctx: &egui::Context) {

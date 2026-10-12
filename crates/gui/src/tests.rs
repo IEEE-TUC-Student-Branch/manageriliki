@@ -1,11 +1,12 @@
-//! Headless UI tests. Set `MGR_SCREENSHOT_DIR` to also save rendered PNGs, and
-//! `MGR_TEST_SSH=host:port:user:keyfile` to exercise a real SSH session.
+//! Headless UI tests. Optional live parts (see README): `MGR_SCREENSHOT_DIR`
+//! saves rendered PNGs, `MGR_TEST_SSH` exercises a real SSH session, and
+//! `MGR_TEST_VNC` (+ `MGR_TEST_VNC_ECHO`) a real VNC display.
 
 use std::time::Duration;
 
 use eframe::egui;
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use manageriliki_core::{Manager, ServerInput, SshAuth, SshConfig};
 
 use super::GuiApp;
@@ -22,6 +23,15 @@ fn type_into(harness: &mut Harness<'_, GuiApp>, label: &str, text: &str) {
     harness.get_by_label(label).focus();
     harness.run();
     harness.get_by_label(label).type_text(text);
+    harness.run();
+}
+
+/// Closes all session and display windows (dropping them disconnects).
+fn close_windows(harness: &mut Harness<'_, GuiApp>) {
+    if let super::Screen::Main(m) = &mut harness.state_mut().screen {
+        m.sessions.clear();
+        m.displays.clear();
+    }
     harness.run();
 }
 
@@ -84,6 +94,8 @@ fn setup_then_manage_servers() {
     harness.get_by_label("+ Add server").click();
     harness.run();
     harness.get_by_label("New server");
+    harness.get_by_label("VNC display").click();
+    harness.run();
     screenshot(&mut harness, "03-add-server");
     harness.get_by_label("Cancel").click();
     harness.run();
@@ -127,6 +139,67 @@ fn setup_then_manage_servers() {
         run_until(&mut harness, Duration::from_secs(5), has_output);
         assert!(has_output(harness.state()), "typed command should run in the SSH session");
         screenshot(&mut harness, "04-ssh-session");
+        close_windows(&mut harness);
+    }
+
+    if let Ok(spec) = std::env::var("MGR_TEST_VNC") {
+        let p: Vec<&str> = spec.splitn(3, ':').collect();
+        let input = ServerInput {
+            name: "vm-console".into(),
+            ssh: None,
+            vnc: Some(manageriliki_core::VncConfig { host: p[0].into(), port: p[1].parse().unwrap(), via_ssh: false }),
+            vnc_secret: p.get(2).map_or(manageriliki_core::SecretUpdate::Keep, |pw| {
+                manageriliki_core::SecretUpdate::Set(pw.to_string())
+            }),
+            ..Default::default()
+        };
+        mgr.save_server(&who, None, input).unwrap();
+        harness.get_by_label("⟳ Refresh").click();
+        harness.run();
+        // vm-console sorts first (empty group); its VNC button is the only enabled one.
+        harness
+            .get_all_by_role_and_label(egui::accesskit::Role::Button, "VNC")
+            .find(|b| !b.accesskit_node().is_disabled())
+            .expect("an enabled VNC button")
+            .click();
+        let has_frame = |app: &GuiApp| match &app.screen {
+            super::Screen::Main(m) => m.displays.first().is_some_and(|d| {
+                d.session.with_framebuffer(|fb| fb.generation > 0)
+            }),
+            _ => false,
+        };
+        run_until(&mut harness, Duration::from_secs(8), has_frame);
+        assert!(has_frame(harness.state()), "VNC window should receive frames");
+        run_until(&mut harness, Duration::from_millis(500), |_| false);
+
+        if std::env::var_os("MGR_TEST_VNC_ECHO").is_some() {
+            // The guest echoes keys: click into the display and type through egui.
+            run_until(&mut harness, Duration::from_millis(1500), |_| false);
+            let pixels = |app: &GuiApp| match &app.screen {
+                super::Screen::Main(m) => m.displays[0].session.with_framebuffer(|fb| fb.pixels.clone()),
+                _ => Vec::new(),
+            };
+            let before = pixels(harness.state());
+            let center = egui::pos2(500.0, 330.0);
+            harness.event(egui::Event::PointerMoved(center));
+            for pressed in [true, false] {
+                harness.event(egui::Event::PointerButton {
+                    pos: center,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                });
+                harness.step();
+            }
+            harness.event(egui::Event::Text("Hello from manageriliki GUI".into()));
+            harness.step();
+            run_until(&mut harness, Duration::from_millis(1500), |_| false);
+            let after = pixels(harness.state());
+            let changed = after.as_chunks::<4>().0.iter().zip(before.as_chunks::<4>().0).filter(|(a, b)| a != b).count();
+            assert!(changed > 300, "typed text should be echoed by the guest ({changed} px changed)");
+        }
+        screenshot(&mut harness, "06-vnc");
+        close_windows(&mut harness);
     }
 
     harness.get_by_label("Users").click();

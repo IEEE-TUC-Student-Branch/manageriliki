@@ -231,7 +231,10 @@ impl Form {
             lines.push(Line::default());
             lines.push(Line::from(err.clone()).fg(Color::Red));
         }
-        frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }), inner);
+        // Scroll so the focused field (line 1 + index) stays visible.
+        let focus_line = 1 + self.focus as u16;
+        let scroll = focus_line.saturating_sub(inner.height.saturating_sub(1));
+        frame.render_widget(Paragraph::new(lines).wrap(Wrap { trim: false }).scroll((scroll, 0)), inner);
     }
 }
 

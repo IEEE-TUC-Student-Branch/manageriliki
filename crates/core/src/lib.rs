@@ -10,6 +10,7 @@ mod probe;
 mod terminal;
 mod transport;
 mod vault;
+mod vnc;
 
 pub use error::{Error, Result};
 pub use manager::{CommandOutput, Identity, Manager};
@@ -17,4 +18,5 @@ pub use models::*;
 pub use probe::{Status, StatusMonitor, probe};
 pub use terminal::{Notify, Terminal, TerminalState};
 pub use transport::serial_ports;
+pub use vnc::{Framebuffer, VncSession, VncState, keysym};
 pub use vt100;

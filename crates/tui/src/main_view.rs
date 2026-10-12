@@ -5,7 +5,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use manageriliki_core::{
     AuditEntry, CommandOutput, FlowControl, Identity, Manager, Parity, Result as CoreResult,
     Role, SecretUpdate, SerialConfig, Server, ServerInput, SshAuth, SshConfig, Status,
-    StatusMonitor, Terminal, TransportKind, User,
+    StatusMonitor, Terminal, TransportKind, User, VncConfig,
 };
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -292,6 +292,13 @@ impl MainView {
             }
             (KeyCode::Enter | KeyCode::Char('s'), Some(s)) => self.open_session(&s, TransportKind::Ssh),
             (KeyCode::Char('c'), Some(s)) => self.open_session(&s, TransportKind::Serial),
+            (KeyCode::Char('v'), Some(s)) => {
+                if s.vnc.is_some() {
+                    self.info(format!("VNC displays need graphics: open '{}' in manageriliki-gui", s.name));
+                } else {
+                    self.error(format!("{} has no VNC display configured", s.name));
+                }
+            }
             (KeyCode::Char('x'), Some(s)) => {
                 let mut scopes = vec![format!("only {}", s.name)];
                 if !s.group.is_empty() {
@@ -631,6 +638,16 @@ impl MainView {
                         Span::raw(format!("{} · flow {:?}", serial.summary(), serial.flow_control)),
                     ]));
                 }
+                if let Some(vnc) = &s.vnc {
+                    lines.push(Line::from(vec![
+                        Span::raw("VNC: ").bold(),
+                        Span::raw(format!(
+                            "{}{} · open it in manageriliki-gui",
+                            vnc.summary(s.ssh.as_ref()),
+                            if s.has_vnc_secret { " · password stored" } else { "" }
+                        )),
+                    ]));
+                }
                 if !s.notes.is_empty() {
                     lines.push(Line::from(vec![Span::raw("Notes: ").bold(), Span::raw(s.notes.clone())]));
                 }
@@ -755,6 +772,7 @@ fn draw_modal(frame: &mut Frame, modal: &Modal) {
                 Line::default(),
                 Line::from("Servers").bold(),
                 Line::from("  Enter, s     SSH shell             c  serial console"),
+                Line::from("  v            VNC display (opens in manageriliki-gui)"),
                 Line::from("  x            run a command on this server, its group, or all"),
                 Line::from("  a / e / d    add / edit / delete (admin)"),
                 Line::from("  h            forget trusted SSH host key (admin)"),
@@ -788,10 +806,10 @@ fn server_form(server: Option<&Server>) -> Form {
     if !BAUD_RATES.contains(&serial.baud) {
         bauds.push(serial.baud.to_string());
     }
-    let hint = if server.is_some_and(|s| s.has_secret) {
-        "A password/passphrase is stored; leave it blank to keep it."
-    } else {
-        ""
+    let vnc = input.vnc.clone().unwrap_or_default();
+    let hint = match server {
+        Some(s) if s.has_secret || s.has_vnc_secret => "Stored passwords are kept when left blank.",
+        _ => "",
     };
     Form::new(if server.is_some() { "Edit server" } else { "New server" })
         .hint(hint)
@@ -827,6 +845,15 @@ fn server_form(server: Option<&Server>) -> Form {
         .when("serial", ON)
         .choice("flow", "Flow control", ["none", "software", "hardware"], flow_str(serial.flow_control))
         .when("serial", ON)
+        .toggle("vnc", "VNC display", input.vnc.is_some())
+        .choice("vnc_via", "Connection", ["direct", "ssh tunnel"], if vnc.via_ssh { "ssh tunnel" } else { "direct" })
+        .when("vnc", ON)
+        .text("vnc_host", "VNC host (blank=auto)", vnc.host)
+        .when("vnc", ON)
+        .text("vnc_port", "VNC port", vnc.port.to_string())
+        .when("vnc", ON)
+        .secret("vnc_secret", "VNC password")
+        .when("vnc", ON)
 }
 
 fn parity_str(p: Parity) -> &'static str {
@@ -877,14 +904,26 @@ fn read_server_form(form: &Form) -> std::result::Result<ServerInput, String> {
     } else {
         None
     };
+    let vnc = if form.on("vnc") {
+        Some(VncConfig {
+            host: form.get("vnc_host"),
+            port: form.get("vnc_port").trim().parse().map_err(|_| "VNC port must be 1-65535")?,
+            via_ssh: form.get("vnc_via") == "ssh tunnel",
+        })
+    } else {
+        None
+    };
     let secret = form.get("secret");
+    let vnc_secret = form.get("vnc_secret");
     Ok(ServerInput {
         name: form.get("name"),
         group: form.get("group"),
         notes: form.get("notes"),
         ssh,
         serial,
+        vnc,
         required_role: Role::parse(&form.get("role")).unwrap_or(Role::Operator),
         secret: if secret.is_empty() { SecretUpdate::Keep } else { SecretUpdate::Set(secret) },
+        vnc_secret: if vnc_secret.is_empty() { SecretUpdate::Keep } else { SecretUpdate::Set(vnc_secret) },
     })
 }

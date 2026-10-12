@@ -3,6 +3,9 @@
 use std::io::{self, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, TryRecvError};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -110,6 +113,7 @@ pub fn ssh_exec(conn: &SshConnection, command: &str) -> Result<ExecResult> {
 pub struct SshLink {
     session: Session,
     channel: Channel,
+    has_pty: bool,
 }
 
 impl SshLink {
@@ -120,7 +124,17 @@ impl SshLink {
         channel.request_pty("xterm-256color", None, Some((cols as u32, rows as u32, 0, 0)))?;
         channel.shell()?;
         session.set_blocking(false);
-        Ok(SshLink { session, channel })
+        Ok(SshLink { session, channel, has_pty: true })
+    }
+
+    /// Forwards a TCP connection to `host:port` as seen from the SSH server.
+    pub fn open_tunnel(conn: SshConnection, host: &str, port: u16) -> Result<Self> {
+        let session = conn.session;
+        let channel = session.channel_direct_tcpip(host, port, None).map_err(|e| {
+            invalid(format!("SSH tunnel to {host}:{port} failed: {e} (is TCP forwarding allowed?)"))
+        })?;
+        session.set_blocking(false);
+        Ok(SshLink { session, channel, has_pty: false })
     }
 }
 
@@ -173,6 +187,9 @@ impl Link for SshLink {
     }
 
     fn resize(&mut self, rows: u16, cols: u16) -> io::Result<()> {
+        if !self.has_pty {
+            return Ok(());
+        }
         again(|| {
             self.channel
                 .request_pty_size(cols as u32, rows as u32, None, None)
@@ -185,6 +202,134 @@ impl Drop for SshLink {
         self.session.set_blocking(true);
         let _ = self.channel.close();
     }
+}
+
+// ---- plain TCP ----
+
+pub struct TcpLink {
+    stream: TcpStream,
+}
+
+impl TcpLink {
+    pub fn connect(host: &str, port: u16) -> Result<Self> {
+        let addr = (host, port)
+            .to_socket_addrs()?
+            .next()
+            .ok_or_else(|| invalid(format!("cannot resolve {host}")))?;
+        let stream = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT)
+            .map_err(|e| invalid(format!("cannot connect to {host}:{port}: {e}")))?;
+        stream.set_nodelay(true)?;
+        stream.set_nonblocking(true)?;
+        Ok(TcpLink { stream })
+    }
+}
+
+impl Link for TcpLink {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<ReadOutcome> {
+        match self.stream.read(buf) {
+            Ok(0) => Ok(ReadOutcome::Eof),
+            Ok(n) => Ok(ReadOutcome::Data(n)),
+            Err(e) if e.kind() == io::ErrorKind::WouldBlock => Ok(ReadOutcome::Idle),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn write_all(&mut self, mut data: &[u8]) -> io::Result<()> {
+        while !data.is_empty() {
+            match self.stream.write(data) {
+                Ok(n) => data = &data[n..],
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(1))
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(())
+    }
+
+    fn resize(&mut self, _rows: u16, _cols: u16) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+// ---- pump ----
+
+/// Blocking reader over the bytes a pump receives; returns EOF when the link closes.
+pub struct PumpReader {
+    rx: Receiver<io::Result<Vec<u8>>>,
+    chunk: Vec<u8>,
+    pos: usize,
+}
+
+impl Read for PumpReader {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        while self.pos >= self.chunk.len() {
+            match self.rx.recv() {
+                Ok(Ok(chunk)) => {
+                    self.chunk = chunk;
+                    self.pos = 0;
+                }
+                Ok(Err(e)) => return Err(e),
+                Err(_) => return Ok(0),
+            }
+        }
+        let n = buf.len().min(self.chunk.len() - self.pos);
+        buf[..n].copy_from_slice(&self.chunk[self.pos..self.pos + n]);
+        self.pos += n;
+        Ok(n)
+    }
+}
+
+/// Drives a non-blocking link on its own thread so a protocol can be written
+/// with plain blocking reads, while bytes queued on `outgoing` are sent.
+/// The pump stops when `stop` is set, the link closes, or the reader is dropped.
+pub fn pump(
+    mut link: Box<dyn Link>,
+    outgoing: Receiver<Vec<u8>>,
+    stop: Arc<AtomicBool>,
+) -> PumpReader {
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let mut buf = vec![0u8; 64 * 1024];
+        while !stop.load(Ordering::Relaxed) {
+            let mut busy = false;
+            match link.read(&mut buf) {
+                Ok(ReadOutcome::Data(n)) => {
+                    if tx.send(Ok(buf[..n].to_vec())).is_err() {
+                        return;
+                    }
+                    busy = true;
+                }
+                Ok(ReadOutcome::Eof) => return,
+                Ok(ReadOutcome::Idle) => {}
+                Err(e) => {
+                    let _ = tx.send(Err(e));
+                    return;
+                }
+            }
+            let mut next = if busy {
+                outgoing.try_recv().map_err(|e| e == TryRecvError::Disconnected)
+            } else {
+                outgoing
+                    .recv_timeout(Duration::from_millis(5))
+                    .map_err(|e| e == RecvTimeoutError::Disconnected)
+            };
+            loop {
+                match next {
+                    Ok(data) => {
+                        if let Err(e) = link.write_all(&data) {
+                            let _ = tx.send(Err(e));
+                            return;
+                        }
+                    }
+                    Err(true) => return,
+                    Err(false) => break,
+                }
+                next = outgoing.try_recv().map_err(|e| e == TryRecvError::Disconnected);
+            }
+        }
+    });
+    PumpReader { rx, chunk: Vec::new(), pos: 0 }
 }
 
 // ---- serial ----

@@ -11,11 +11,12 @@ use std::thread;
 use rusqlite::Connection;
 
 use crate::auth;
-use crate::db::{self, ServerRow};
+use crate::db::{self, SecretSlot, ServerRow};
 use crate::error::{Error, Result, invalid};
 use crate::models::*;
 use crate::terminal::{Connector, Notify, Terminal};
-use crate::transport::{self, Link, SerialLink, SshLink};
+use crate::transport::{self, Link, SerialLink, SshLink, TcpLink};
+use crate::vnc::{VncConnector, VncSession};
 use crate::vault::Vault;
 
 /// A logged-in user. Permissions are re-validated on every call, so changes
@@ -288,6 +289,7 @@ impl Manager {
             notes: &input.notes,
             ssh: &input.ssh,
             serial: &input.serial,
+            vnc: &input.vnc,
             required_role: input.required_role,
         };
         let id = match id {
@@ -297,16 +299,29 @@ impl Manager {
             }
             None => db::insert_server(&conn, &row)?,
         };
-        match (&input.secret, uses_secret) {
-            (_, false) | (SecretUpdate::Clear, _) => db::set_secret(&conn, id, None)?,
-            (SecretUpdate::Set(s), true) if s.is_empty() => db::set_secret(&conn, id, None)?,
-            (SecretUpdate::Set(s), true) => {
-                db::set_secret(&conn, id, Some(&self.inner.vault.encrypt(s)?))?
-            }
-            (SecretUpdate::Keep, true) => {}
-        }
+        self.store_secret(&conn, id, SecretSlot::Ssh, &input.secret, uses_secret)?;
+        self.store_secret(&conn, id, SecretSlot::Vnc, &input.vnc_secret, input.vnc.is_some())?;
         db::audit(&conn, &who.username, "server.save", &input.name, "")?;
         Ok(id)
+    }
+
+    /// Applies a secret update; an unused secret is always removed.
+    fn store_secret(
+        &self,
+        conn: &Connection,
+        id: i64,
+        slot: SecretSlot,
+        update: &SecretUpdate,
+        used: bool,
+    ) -> Result<()> {
+        match (update, used) {
+            (_, false) | (SecretUpdate::Clear, _) => db::set_secret(conn, id, slot, None),
+            (SecretUpdate::Set(s), true) if s.is_empty() => db::set_secret(conn, id, slot, None),
+            (SecretUpdate::Set(s), true) => {
+                db::set_secret(conn, id, slot, Some(&self.inner.vault.encrypt(s)?))
+            }
+            (SecretUpdate::Keep, true) => Ok(()),
+        }
     }
 
     pub fn delete_server(&self, who: &Identity, id: i64) -> Result<()> {
@@ -339,8 +354,8 @@ impl Manager {
         Ok(server)
     }
 
-    fn secret(&self, server_id: i64) -> Result<Option<String>> {
-        db::get_secret(&self.db(), server_id)?
+    fn secret(&self, server_id: i64, slot: SecretSlot) -> Result<Option<String>> {
+        db::get_secret(&self.db(), server_id, slot)?
             .map(|s| self.inner.vault.decrypt(&s))
             .transpose()
     }
@@ -372,7 +387,7 @@ impl Manager {
             .ssh
             .as_ref()
             .ok_or_else(|| invalid(format!("{} has no SSH configuration", server.name)))?;
-        let secret = self.secret(server.id)?;
+        let secret = self.secret(server.id, SecretSlot::Ssh)?;
         transport::ssh_connect(cfg, secret.as_deref(), |fp| {
             self.check_host_key(who, server, fp)
         })
@@ -408,6 +423,7 @@ impl Manager {
                     .ok_or_else(|| invalid(format!("{} has no serial configuration", server.name)))?;
                 Box::new(move || Ok(Box::new(SerialLink::open(&cfg)?) as Box<dyn Link>))
             }
+            TransportKind::Vnc => return Err(invalid("use open_vnc for VNC displays")),
         };
 
         self.audit(&who.username, "session.open", &server.name, &kind.to_string());
@@ -417,6 +433,42 @@ impl Manager {
         });
         let title = format!("{} ({kind})", server.name);
         Ok(Terminal::spawn(title, rows, cols, notify as Notify, connect, on_close))
+    }
+
+    /// Opens a VNC display, directly or tunneled through the server's SSH.
+    /// Connecting happens in the background; watch `VncSession::state()`.
+    pub fn open_vnc(&self, who: &Identity, server_id: i64, notify: Notify) -> Result<VncSession> {
+        let server = self.connectable(who, server_id)?;
+        let cfg = server
+            .vnc
+            .clone()
+            .ok_or_else(|| invalid(format!("{} has no VNC configuration", server.name)))?;
+        let password = self.secret(server.id, SecretSlot::Vnc)?;
+
+        let connect: VncConnector = if cfg.via_ssh {
+            let (mgr, user, server) = (self.clone(), who.username.clone(), server.clone());
+            let host = if cfg.host.is_empty() { "127.0.0.1".to_string() } else { cfg.host.clone() };
+            Box::new(move || {
+                let conn = mgr.ssh_connect(&user, &server)?;
+                Ok(Box::new(SshLink::open_tunnel(conn, &host, cfg.port)?) as Box<dyn Link>)
+            })
+        } else {
+            let host = match (&cfg.host, &server.ssh) {
+                (h, _) if !h.is_empty() => h.clone(),
+                (_, Some(ssh)) => ssh.host.clone(),
+                _ => return Err(invalid("VNC needs a host")),
+            };
+            Box::new(move || Ok(Box::new(TcpLink::connect(&host, cfg.port)?) as Box<dyn Link>))
+        };
+
+        let detail = format!("vnc {}", cfg.summary(server.ssh.as_ref()));
+        self.audit(&who.username, "session.open", &server.name, &detail);
+        let (mgr, username, name) = (self.clone(), who.username.clone(), server.name.clone());
+        let on_close = Box::new(move |err: Option<&str>| {
+            mgr.audit(&username, "session.close", &name, err.unwrap_or(""));
+        });
+        let title = format!("{} (vnc)", server.name);
+        Ok(VncSession::spawn(title, password, notify, connect, on_close))
     }
 
     /// Runs a command over SSH and waits for it to finish. Blocking: call it
@@ -468,8 +520,8 @@ fn normalize_server(mut input: ServerInput) -> Result<ServerInput> {
     if input.name.is_empty() {
         return Err(invalid("server name is required"));
     }
-    if input.ssh.is_none() && input.serial.is_none() {
-        return Err(invalid("configure SSH, serial, or both"));
+    if input.ssh.is_none() && input.serial.is_none() && input.vnc.is_none() {
+        return Err(invalid("configure at least one of SSH, serial or VNC"));
     }
     if let Some(ssh) = &mut input.ssh {
         ssh.host = ssh.host.trim().to_string();
@@ -491,6 +543,18 @@ fn normalize_server(mut input: ServerInput) -> Result<ServerInput> {
         }
         if !(5..=8).contains(&serial.data_bits) || !(1..=2).contains(&serial.stop_bits) {
             return Err(invalid("data bits must be 5-8 and stop bits 1-2"));
+        }
+    }
+    if let Some(vnc) = &mut input.vnc {
+        vnc.host = vnc.host.trim().to_string();
+        if vnc.port == 0 {
+            return Err(invalid("VNC needs a port (5900 + display number)"));
+        }
+        if vnc.via_ssh && input.ssh.is_none() {
+            return Err(invalid("tunneling VNC through SSH needs SSH to be configured"));
+        }
+        if !vnc.via_ssh && vnc.host.is_empty() && input.ssh.is_none() {
+            return Err(invalid("VNC needs a host"));
         }
     }
     // Viewers can never connect, so the floor is operator.
@@ -563,7 +627,7 @@ mod tests {
         input.secret = SecretUpdate::Set("hunter22".into());
         let id = m.save_server(&admin, None, input.clone()).unwrap();
         assert!(m.get_server(&admin, id).unwrap().has_secret);
-        assert_eq!(m.secret(id).unwrap().as_deref(), Some("hunter22"));
+        assert_eq!(m.secret(id, SecretSlot::Ssh).unwrap().as_deref(), Some("hunter22"));
         assert!(m.save_server(&admin, None, input.clone()).is_err(), "duplicate name");
 
         // Switching to agent auth drops the stored secret.
@@ -584,6 +648,21 @@ mod tests {
         ));
         m.reset_host_key(&admin, id).unwrap();
         m.check_host_key("admin", &s, "SHA256:bbb").unwrap();
+
+        // VNC password lives in its own slot and is dropped with the VNC config.
+        let mut edit = ServerInput::from_server(&m.get_server(&admin, id).unwrap());
+        edit.vnc = Some(VncConfig { via_ssh: true, ..Default::default() });
+        edit.vnc_secret = SecretUpdate::Set("vncpass".into());
+        m.save_server(&admin, Some(id), edit).unwrap();
+        let s = m.get_server(&admin, id).unwrap();
+        assert!(s.has_vnc_secret && !s.has_secret);
+        assert_eq!(m.secret(id, SecretSlot::Vnc).unwrap().as_deref(), Some("vncpass"));
+        let mut edit = ServerInput::from_server(&s);
+        edit.ssh = None;
+        assert!(m.save_server(&admin, Some(id), edit.clone()).is_err(), "tunnel needs ssh");
+        edit.vnc = None;
+        m.save_server(&admin, Some(id), edit).unwrap();
+        assert!(!m.get_server(&admin, id).unwrap().has_vnc_secret);
 
         m.delete_server(&admin, id).unwrap();
         assert!(m.list_servers(&admin).unwrap().is_empty());

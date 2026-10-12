@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use crate::error::{Error, Result};
-use crate::models::{AuditEntry, Role, SerialConfig, Server, SshConfig, User};
+use crate::models::{AuditEntry, Role, SerialConfig, Server, SshConfig, User, VncConfig};
 
 const MIGRATIONS: &[&str] = &[r#"
     CREATE TABLE users (
@@ -38,6 +38,9 @@ const MIGRATIONS: &[&str] = &[r#"
         target   TEXT NOT NULL,
         detail   TEXT NOT NULL
     );
+"#, r#"
+    ALTER TABLE servers ADD COLUMN vnc TEXT;
+    ALTER TABLE servers ADD COLUMN vnc_secret BLOB;
 "#];
 
 pub fn open(path: &Path) -> Result<Connection> {
@@ -180,8 +183,8 @@ pub fn delete_user(conn: &Connection, id: i64) -> Result<()> {
 
 // ---- servers ----
 
-const SERVER_COLS: &str =
-    "id, name, grp, notes, ssh, serial, required_role, secret IS NOT NULL AS has_secret, host_key_fp";
+const SERVER_COLS: &str = "id, name, grp, notes, ssh, serial, vnc, required_role, \
+     secret IS NOT NULL AS has_secret, vnc_secret IS NOT NULL AS has_vnc_secret, host_key_fp";
 
 fn server_from_row(row: &Row) -> rusqlite::Result<Server> {
     Ok(Server {
@@ -191,8 +194,10 @@ fn server_from_row(row: &Row) -> rusqlite::Result<Server> {
         notes: row.get("notes")?,
         ssh: json_col::<SshConfig>(row, "ssh")?,
         serial: json_col::<SerialConfig>(row, "serial")?,
+        vnc: json_col::<VncConfig>(row, "vnc")?,
         required_role: role_col(row, "required_role")?,
         has_secret: row.get("has_secret")?,
+        has_vnc_secret: row.get("has_vnc_secret")?,
         host_key_fp: row.get("host_key_fp")?,
     })
 }
@@ -221,19 +226,21 @@ pub struct ServerRow<'a> {
     pub notes: &'a str,
     pub ssh: &'a Option<SshConfig>,
     pub serial: &'a Option<SerialConfig>,
+    pub vnc: &'a Option<VncConfig>,
     pub required_role: Role,
 }
 
 pub fn insert_server(conn: &Connection, s: &ServerRow) -> Result<i64> {
     conn.execute(
-        "INSERT INTO servers (name, grp, notes, ssh, serial, required_role)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        "INSERT INTO servers (name, grp, notes, ssh, serial, vnc, required_role)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![
             s.name,
             s.group,
             s.notes,
             to_json(s.ssh),
             to_json(s.serial),
+            to_json(s.vnc),
             s.required_role.as_str()
         ],
     )
@@ -244,7 +251,7 @@ pub fn insert_server(conn: &Connection, s: &ServerRow) -> Result<i64> {
 pub fn update_server(conn: &Connection, id: i64, s: &ServerRow) -> Result<()> {
     conn.execute(
         "UPDATE servers SET name = ?2, grp = ?3, notes = ?4, ssh = ?5, serial = ?6,
-         required_role = ?7 WHERE id = ?1",
+         vnc = ?7, required_role = ?8 WHERE id = ?1",
         params![
             id,
             s.name,
@@ -252,6 +259,7 @@ pub fn update_server(conn: &Connection, id: i64, s: &ServerRow) -> Result<()> {
             s.notes,
             to_json(s.ssh),
             to_json(s.serial),
+            to_json(s.vnc),
             s.required_role.as_str()
         ],
     )
@@ -259,17 +267,31 @@ pub fn update_server(conn: &Connection, id: i64, s: &ServerRow) -> Result<()> {
     Ok(())
 }
 
-pub fn get_secret(conn: &Connection, id: i64) -> Result<Option<Vec<u8>>> {
-    Ok(conn.query_row("SELECT secret FROM servers WHERE id = ?1", [id], |r| {
-        r.get(0)
-    })?)
+/// Which stored secret of a server to access.
+#[derive(Clone, Copy)]
+pub enum SecretSlot {
+    /// SSH password or key passphrase.
+    Ssh,
+    Vnc,
 }
 
-pub fn set_secret(conn: &Connection, id: i64, secret: Option<&[u8]>) -> Result<()> {
-    conn.execute(
-        "UPDATE servers SET secret = ?2 WHERE id = ?1",
-        params![id, secret],
-    )?;
+impl SecretSlot {
+    fn column(self) -> &'static str {
+        match self {
+            SecretSlot::Ssh => "secret",
+            SecretSlot::Vnc => "vnc_secret",
+        }
+    }
+}
+
+pub fn get_secret(conn: &Connection, id: i64, slot: SecretSlot) -> Result<Option<Vec<u8>>> {
+    let sql = format!("SELECT {} FROM servers WHERE id = ?1", slot.column());
+    Ok(conn.query_row(&sql, [id], |r| r.get(0))?)
+}
+
+pub fn set_secret(conn: &Connection, id: i64, slot: SecretSlot, secret: Option<&[u8]>) -> Result<()> {
+    let sql = format!("UPDATE servers SET {} = ?2 WHERE id = ?1", slot.column());
+    conn.execute(&sql, params![id, secret])?;
     Ok(())
 }
 

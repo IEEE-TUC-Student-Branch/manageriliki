@@ -3,6 +3,7 @@
 use eframe::egui::{self, Color32, RichText, Ui};
 use manageriliki_core::{
     FlowControl, Parity, Role, SecretUpdate, SerialConfig, Server, ServerInput, SshAuth, SshConfig, User,
+    VncConfig,
 };
 
 const BAUD_RATES: [u32; 10] = [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 921600];
@@ -75,6 +76,10 @@ pub struct ServerEditor {
     has_secret: bool,
     serial_enabled: bool,
     serial: SerialConfig,
+    vnc_enabled: bool,
+    vnc: VncConfig,
+    vnc_secret: String,
+    has_vnc_secret: bool,
 }
 
 impl ServerEditor {
@@ -103,6 +108,10 @@ impl ServerEditor {
             has_secret: server.is_some_and(|s| s.has_secret),
             serial_enabled: input.serial.is_some(),
             serial: input.serial.unwrap_or_default(),
+            vnc_enabled: input.vnc.is_some(),
+            vnc: input.vnc.unwrap_or_default(),
+            vnc_secret: String::new(),
+            has_vnc_secret: server.is_some_and(|s| s.has_vnc_secret),
         }
     }
 
@@ -124,8 +133,14 @@ impl ServerEditor {
             notes: self.notes.clone(),
             ssh,
             serial: self.serial_enabled.then(|| self.serial.clone()),
+            vnc: self.vnc_enabled.then(|| self.vnc.clone()),
             required_role: self.required_role,
             secret: if self.secret.is_empty() { SecretUpdate::Keep } else { SecretUpdate::Set(self.secret.clone()) },
+            vnc_secret: if self.vnc_secret.is_empty() {
+                SecretUpdate::Keep
+            } else {
+                SecretUpdate::Set(self.vnc_secret.clone())
+            },
         })
     }
 
@@ -234,6 +249,48 @@ impl ServerEditor {
                         });
                     });
                 });
+            });
+
+            ui.add_space(6.0);
+            ui.checkbox(&mut self.vnc_enabled, RichText::new("VNC display").strong());
+            ui.add_enabled_ui(self.vnc_enabled, |ui| {
+                let v = &mut self.vnc;
+                egui::Grid::new("server-vnc").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
+                    row(ui, "Connection", |ui| {
+                        ui.horizontal(|ui| {
+                            ui.radio_value(&mut v.via_ssh, false, "direct");
+                            ui.add_enabled_ui(self.ssh_enabled, |ui| {
+                                ui.radio_value(&mut v.via_ssh, true, "tunnel through SSH (encrypted)");
+                            });
+                        });
+                    });
+                    let hint = match (v.via_ssh, self.ssh_enabled) {
+                        (true, _) => "127.0.0.1 (as seen from the server)",
+                        (false, true) => "same as SSH host",
+                        (false, false) => "",
+                    };
+                    row(ui, "Host", |ui| {
+                        ui.add(egui::TextEdit::singleline(&mut v.host).hint_text(hint).desired_width(260.0));
+                    });
+                    row(ui, "Port", |ui| {
+                        ui.horizontal(|ui| {
+                            ui.add(egui::DragValue::new(&mut v.port).range(1..=65535));
+                            ui.label(RichText::new(format!("display :{}", v.port.saturating_sub(5900))).weak());
+                        });
+                    });
+                    row(ui, "Password", |ui| {
+                        let hint = if self.has_vnc_secret { "stored — leave blank to keep" } else { "none" };
+                        ui.add(egui::TextEdit::singleline(&mut self.vnc_secret).password(true).hint_text(hint).desired_width(260.0))
+                            .on_hover_text("VNC passwords are limited to 8 characters by the protocol.");
+                    });
+                });
+                if !v.via_ssh {
+                    ui.label(
+                        RichText::new("Direct VNC is unencrypted; fine on a trusted LAN, otherwise prefer the SSH tunnel.")
+                            .weak()
+                            .small(),
+                    );
+                }
             });
         })
     }

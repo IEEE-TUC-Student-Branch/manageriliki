@@ -140,6 +140,40 @@ impl Default for SerialConfig {
     }
 }
 
+/// A VNC display, reached directly or through the server's SSH connection.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VncConfig {
+    /// Host to connect to. Empty means the SSH host when direct, or the
+    /// server itself (127.0.0.1) when tunneling.
+    pub host: String,
+    pub port: u16,
+    /// Tunnel the connection through the server's SSH configuration.
+    pub via_ssh: bool,
+}
+
+impl Default for VncConfig {
+    fn default() -> Self {
+        VncConfig { host: String::new(), port: 5900, via_ssh: false }
+    }
+}
+
+impl VncConfig {
+    /// Short form such as `10.0.0.5:5900` or `127.0.0.1:5901 via ssh`.
+    pub fn summary(&self, ssh: Option<&SshConfig>) -> String {
+        if self.via_ssh {
+            let host = if self.host.is_empty() { "127.0.0.1" } else { &self.host };
+            format!("{host}:{} via ssh", self.port)
+        } else {
+            let host = match (self.host.is_empty(), ssh) {
+                (false, _) => self.host.as_str(),
+                (true, Some(ssh)) => ssh.host.as_str(),
+                (true, None) => "?",
+            };
+            format!("{host}:{}", self.port)
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Server {
     pub id: i64,
@@ -148,10 +182,13 @@ pub struct Server {
     pub notes: String,
     pub ssh: Option<SshConfig>,
     pub serial: Option<SerialConfig>,
+    pub vnc: Option<VncConfig>,
     /// Minimum role needed to connect to this server (never below operator).
     pub required_role: Role,
-    /// Whether a password / key passphrase is stored for this server.
+    /// Whether an SSH password / key passphrase is stored for this server.
     pub has_secret: bool,
+    /// Whether a VNC password is stored for this server.
+    pub has_vnc_secret: bool,
     /// Trusted SSH host key fingerprint, recorded on first connection.
     pub host_key_fp: Option<String>,
 }
@@ -172,8 +209,11 @@ pub struct ServerInput {
     pub notes: String,
     pub ssh: Option<SshConfig>,
     pub serial: Option<SerialConfig>,
+    pub vnc: Option<VncConfig>,
     pub required_role: Role,
+    /// SSH password or key passphrase.
     pub secret: SecretUpdate,
+    pub vnc_secret: SecretUpdate,
 }
 
 impl ServerInput {
@@ -184,8 +224,10 @@ impl ServerInput {
             notes: s.notes.clone(),
             ssh: s.ssh.clone(),
             serial: s.serial.clone(),
+            vnc: s.vnc.clone(),
             required_role: s.required_role,
             secret: SecretUpdate::Keep,
+            vnc_secret: SecretUpdate::Keep,
         }
     }
 }
@@ -198,8 +240,10 @@ impl Default for ServerInput {
             notes: String::new(),
             ssh: Some(SshConfig::default()),
             serial: None,
+            vnc: None,
             required_role: Role::Operator,
             secret: SecretUpdate::Keep,
+            vnc_secret: SecretUpdate::Keep,
         }
     }
 }
@@ -208,6 +252,7 @@ impl Default for ServerInput {
 pub enum TransportKind {
     Ssh,
     Serial,
+    Vnc,
 }
 
 impl fmt::Display for TransportKind {
@@ -215,6 +260,7 @@ impl fmt::Display for TransportKind {
         f.write_str(match self {
             TransportKind::Ssh => "ssh",
             TransportKind::Serial => "serial",
+            TransportKind::Vnc => "vnc",
         })
     }
 }
