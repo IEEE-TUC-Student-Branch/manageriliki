@@ -127,6 +127,16 @@ impl SshLink {
         Ok(SshLink { session, channel, has_pty: true })
     }
 
+    /// Runs `command` with a PTY of the given size, e.g. a shell inside a container.
+    pub fn open_exec(conn: SshConnection, rows: u16, cols: u16, command: &str) -> Result<Self> {
+        let session = conn.session;
+        let mut channel = session.channel_session()?;
+        channel.request_pty("xterm-256color", None, Some((cols as u32, rows as u32, 0, 0)))?;
+        channel.exec(command)?;
+        session.set_blocking(false);
+        Ok(SshLink { session, channel, has_pty: true })
+    }
+
     /// Forwards a TCP connection to `host:port` as seen from the SSH server.
     pub fn open_tunnel(conn: SshConnection, host: &str, port: u16) -> Result<Self> {
         let session = conn.session;

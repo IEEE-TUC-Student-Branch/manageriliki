@@ -2,7 +2,7 @@
 
 use eframe::egui::{self, Color32, RichText, Ui};
 use manageriliki_core::{
-    FlowControl, Parity, Role, SecretUpdate, SerialConfig, Server, ServerInput, SshAuth, SshConfig, User,
+    FlowControl, Group, Parity, Role, SecretUpdate, SerialConfig, Server, ServerInput, SshAuth, SshConfig, User,
     VncConfig,
 };
 
@@ -144,13 +144,26 @@ impl ServerEditor {
         })
     }
 
-    pub fn show(&mut self, ctx: &egui::Context) -> DialogResult {
+    pub fn show(&mut self, ctx: &egui::Context, groups: &[Group]) -> DialogResult {
         let title = if self.id.is_some() { "Edit server" } else { "New server" };
         let error = self.error.clone();
         modal(ctx, "server-editor", title, &error, |ui| {
             egui::Grid::new("server-general").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
                 row(ui, "Name", |ui| text(ui, &mut self.name));
-                row(ui, "Group", |ui| text(ui, &mut self.group));
+                row(ui, "Group", |ui| {
+                    ui.horizontal(|ui| {
+                        let shown = if self.group.is_empty() { "(none)" } else { self.group.as_str() };
+                        egui::ComboBox::from_id_salt("group").width(244.0).selected_text(shown).show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.group, String::new(), "(none)");
+                            for g in groups {
+                                ui.selectable_value(&mut self.group, g.name.clone(), &g.name);
+                            }
+                        });
+                        if groups.is_empty() {
+                            ui.label(RichText::new("add groups in Settings").weak().small());
+                        }
+                    });
+                });
                 row(ui, "Notes", |ui| text(ui, &mut self.notes));
                 row(ui, "Who may connect", |ui| {
                     ui.horizontal(|ui| {
@@ -292,6 +305,31 @@ impl ServerEditor {
                     );
                 }
             });
+        })
+    }
+}
+
+/// Renames a server group.
+pub struct GroupEditor {
+    pub id: i64,
+    pub name: String,
+    old: String,
+    pub error: Option<String>,
+}
+
+impl GroupEditor {
+    pub fn new(group: &Group) -> Self {
+        GroupEditor { id: group.id, name: group.name.clone(), old: group.name.clone(), error: None }
+    }
+
+    pub fn show(&mut self, ctx: &egui::Context) -> DialogResult {
+        let title = format!("Rename group {}", self.old);
+        let error = self.error.clone();
+        modal(ctx, "group-editor", &title, &error, |ui| {
+            egui::Grid::new("group-form").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
+                row(ui, "Name", |ui| text(ui, &mut self.name));
+            });
+            ui.label(RichText::new("Servers in this group move to the new name.").weak().small());
         })
     }
 }

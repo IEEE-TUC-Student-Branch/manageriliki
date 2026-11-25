@@ -9,7 +9,7 @@ use manageriliki_core::{Terminal, TerminalState, vt100};
 
 const FONT_SIZE: f32 = 14.0;
 const DEFAULT_FG: Color32 = Color32::from_rgb(0xd0, 0xd0, 0xd0);
-const DEFAULT_BG: Color32 = Color32::from_rgb(0x16, 0x16, 0x1a);
+const DEFAULT_BG: Color32 = Color32::from_rgb(0x0b, 0x0c, 0x0e);
 
 const ANSI: [Color32; 16] = [
     Color32::from_rgb(0x1e, 0x1e, 0x1e),

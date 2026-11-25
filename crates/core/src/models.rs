@@ -193,6 +193,15 @@ pub struct Server {
     pub host_key_fp: Option<String>,
 }
 
+/// A named server group, managed by admins and picked in the server form.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Group {
+    pub id: i64,
+    pub name: String,
+    /// Number of servers currently in the group.
+    pub server_count: i64,
+}
+
 /// What to do with a server's stored secret when saving it.
 #[derive(Clone, Debug, Default)]
 pub enum SecretUpdate {

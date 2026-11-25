@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use rusqlite::{Connection, OptionalExtension, Row, params};
 
 use crate::error::{Error, Result};
-use crate::models::{AuditEntry, Role, SerialConfig, Server, SshConfig, User, VncConfig};
+use crate::models::{AuditEntry, Group, Role, SerialConfig, Server, SshConfig, User, VncConfig};
 
 const MIGRATIONS: &[&str] = &[r#"
     CREATE TABLE users (
@@ -41,6 +41,12 @@ const MIGRATIONS: &[&str] = &[r#"
 "#, r#"
     ALTER TABLE servers ADD COLUMN vnc TEXT;
     ALTER TABLE servers ADD COLUMN vnc_secret BLOB;
+"#, r#"
+    CREATE TABLE groups (
+        id   INTEGER PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE COLLATE NOCASE
+    );
+    INSERT OR IGNORE INTO groups (name) SELECT DISTINCT grp FROM servers WHERE grp <> '' ORDER BY grp;
 "#];
 
 pub fn open(path: &Path) -> Result<Connection> {
@@ -305,6 +311,63 @@ pub fn set_host_key(conn: &Connection, id: i64, fp: Option<&str>) -> Result<()> 
 
 pub fn delete_server(conn: &Connection, id: i64) -> Result<()> {
     conn.execute("DELETE FROM servers WHERE id = ?1", [id])?;
+    Ok(())
+}
+
+// ---- groups ----
+
+fn group_from_row(row: &Row) -> rusqlite::Result<Group> {
+    Ok(Group { id: row.get(0)?, name: row.get(1)?, server_count: row.get(2)? })
+}
+
+const GROUP_SELECT: &str = "SELECT g.id, g.name,
+     (SELECT COUNT(*) FROM servers s WHERE s.grp = g.name COLLATE NOCASE)
+     FROM groups g";
+
+pub fn list_groups(conn: &Connection) -> Result<Vec<Group>> {
+    let mut stmt = conn.prepare(&format!("{GROUP_SELECT} ORDER BY g.name"))?;
+    let groups = stmt.query_map([], group_from_row)?.collect::<rusqlite::Result<_>>()?;
+    Ok(groups)
+}
+
+pub fn get_group(conn: &Connection, id: i64) -> Result<Group> {
+    conn.query_row(&format!("{GROUP_SELECT} WHERE g.id = ?1"), [id], group_from_row)
+        .optional()?
+        .ok_or_else(|| Error::NotFound(format!("group #{id}")))
+}
+
+/// The stored spelling of a group name, matched case-insensitively.
+pub fn find_group_name(conn: &Connection, name: &str) -> Result<Option<String>> {
+    Ok(conn
+        .query_row("SELECT name FROM groups WHERE name = ?1", [name], |r| r.get(0))
+        .optional()?)
+}
+
+pub fn insert_group(conn: &Connection, name: &str) -> Result<i64> {
+    conn.execute("INSERT INTO groups (name) VALUES (?1)", [name])
+        .map_err(|e| unique_violation(e, format!("group '{name}' already exists")))?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Renames a group and moves its servers along with it.
+pub fn rename_group(conn: &mut Connection, id: i64, old: &str, new: &str) -> Result<()> {
+    let tx = conn.transaction()?;
+    tx.execute("UPDATE groups SET name = ?2 WHERE id = ?1", params![id, new])
+        .map_err(|e| unique_violation(e, format!("group '{new}' already exists")))?;
+    tx.execute(
+        "UPDATE servers SET grp = ?2 WHERE grp = ?1 COLLATE NOCASE",
+        params![old, new],
+    )?;
+    tx.commit()?;
+    Ok(())
+}
+
+/// Deletes a group; its servers are left without a group.
+pub fn delete_group(conn: &mut Connection, id: i64, name: &str) -> Result<()> {
+    let tx = conn.transaction()?;
+    tx.execute("UPDATE servers SET grp = '' WHERE grp = ?1 COLLATE NOCASE", [name])?;
+    tx.execute("DELETE FROM groups WHERE id = ?1", [id])?;
+    tx.commit()?;
     Ok(())
 }
 

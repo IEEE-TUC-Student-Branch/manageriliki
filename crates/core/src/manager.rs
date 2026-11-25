@@ -11,6 +11,7 @@ use std::thread;
 use rusqlite::Connection;
 
 use crate::auth;
+use crate::containers::{self, Container, Exec as _, ContainerAction, ContainerList, ContainerService};
 use crate::db::{self, SecretSlot, ServerRow};
 use crate::error::{Error, Result, invalid};
 use crate::models::*;
@@ -262,9 +263,14 @@ impl Manager {
     /// Creates (`id == None`) or updates a server. Returns its id.
     pub fn save_server(&self, who: &Identity, id: Option<i64>, input: ServerInput) -> Result<i64> {
         self.authorize(who, Role::Admin)?;
-        let input = normalize_server(input)?;
+        let mut input = normalize_server(input)?;
 
         let conn = self.db();
+        if !input.group.is_empty() {
+            input.group = db::find_group_name(&conn, &input.group)?.ok_or_else(|| {
+                invalid(format!("group '{}' does not exist; create it in Settings first", input.group))
+            })?;
+        }
         let had_secret = match id {
             Some(id) => db::get_server(&conn, id)?.has_secret,
             None => false,
@@ -330,6 +336,47 @@ impl Manager {
         let server = db::get_server(&conn, id)?;
         db::delete_server(&conn, id)?;
         db::audit(&conn, &who.username, "server.delete", &server.name, "")?;
+        Ok(())
+    }
+
+    // ---- groups ----
+
+    pub fn list_groups(&self, who: &Identity) -> Result<Vec<Group>> {
+        self.authorize(who, Role::Viewer)?;
+        db::list_groups(&self.db())
+    }
+
+    pub fn create_group(&self, who: &Identity, name: &str) -> Result<Group> {
+        self.authorize(who, Role::Admin)?;
+        let name = validate_group_name(name)?;
+        let conn = self.db();
+        let id = db::insert_group(&conn, name)?;
+        db::audit(&conn, &who.username, "group.create", name, "")?;
+        db::get_group(&conn, id)
+    }
+
+    /// Renames a group; its servers follow.
+    pub fn rename_group(&self, who: &Identity, id: i64, name: &str) -> Result<()> {
+        self.authorize(who, Role::Admin)?;
+        let name = validate_group_name(name)?;
+        let mut conn = self.db();
+        let group = db::get_group(&conn, id)?;
+        if group.name == name {
+            return Ok(());
+        }
+        db::rename_group(&mut conn, id, &group.name, name)?;
+        db::audit(&conn, &who.username, "group.rename", name, &format!("was {}", group.name))?;
+        Ok(())
+    }
+
+    /// Deletes a group. Its servers are kept, without a group.
+    pub fn delete_group(&self, who: &Identity, id: i64) -> Result<()> {
+        self.authorize(who, Role::Admin)?;
+        let mut conn = self.db();
+        let group = db::get_group(&conn, id)?;
+        db::delete_group(&mut conn, id, &group.name)?;
+        let detail = format!("{} server(s) ungrouped", group.server_count);
+        db::audit(&conn, &who.username, "group.delete", &group.name, &detail)?;
         Ok(())
     }
 
@@ -506,12 +553,107 @@ impl Manager {
         rx
     }
 
+    // ---- containers ----
+
+    /// Lists the Docker, Podman, LXC and Kubernetes containers on a server.
+    /// Blocking: call it from a worker thread in interactive frontends.
+    pub fn list_containers(&self, who: &Identity, server_id: i64) -> Result<ContainerList> {
+        let server = self.connectable(who, server_id)?;
+        let conn = self.ssh_connect(&who.username, &server)?;
+        containers::list(&conn)
+    }
+
+    /// What a container provides and runs: published ports and processes,
+    /// systemd services inside LXC, or a pod's containers and Services. Blocking.
+    pub fn container_services(
+        &self,
+        who: &Identity,
+        server_id: i64,
+        container: &Container,
+    ) -> Result<Vec<ContainerService>> {
+        let server = self.connectable(who, server_id)?;
+        let conn = self.ssh_connect(&who.username, &server)?;
+        containers::services(&conn, container)
+    }
+
+    /// The last 200 log lines of a container. Blocking.
+    pub fn container_logs(&self, who: &Identity, server_id: i64, container: &Container) -> Result<String> {
+        let server = self.connectable(who, server_id)?;
+        let detail = format!("{} {}", container.runtime, container.display_name());
+        self.audit(&who.username, "container.logs", &server.name, &detail);
+        let conn = self.ssh_connect(&who.username, &server)?;
+        let out = conn.exec(&container.logs_command())?;
+        Ok(out.stdout)
+    }
+
+    /// Starts, stops or restarts a container. Blocking.
+    pub fn container_action(
+        &self,
+        who: &Identity,
+        server_id: i64,
+        container: &Container,
+        action: ContainerAction,
+    ) -> Result<()> {
+        let server = self.connectable(who, server_id)?;
+        let command = container.action_command(action)?;
+        let detail = format!("{} {}", container.runtime, container.display_name());
+        self.audit(&who.username, &format!("container.{}", action.as_str()), &server.name, &detail);
+        let conn = self.ssh_connect(&who.username, &server)?;
+        let out = conn.exec(&command)?;
+        if out.exit_status != 0 {
+            let msg = if out.stderr.trim().is_empty() { out.stdout } else { out.stderr };
+            return Err(invalid(format!("{} failed: {}", action.as_str(), msg.trim())));
+        }
+        Ok(())
+    }
+
+    /// Opens an interactive shell inside a container, like `open_terminal`.
+    pub fn open_container_shell(
+        &self,
+        who: &Identity,
+        server_id: i64,
+        container: &Container,
+        rows: u16,
+        cols: u16,
+        notify: Notify,
+    ) -> Result<Terminal> {
+        let server = self.connectable(who, server_id)?;
+        if server.ssh.is_none() {
+            return Err(invalid(format!("{} has no SSH configuration", server.name)));
+        }
+        let command = container.shell_command();
+        let detail = format!("shell {} {}", container.runtime, container.display_name());
+        self.audit(&who.username, "session.open", &server.name, &detail);
+        let (mgr, user, srv) = (self.clone(), who.username.clone(), server.clone());
+        let connect: Connector = Box::new(move || {
+            let conn = mgr.ssh_connect(&user, &srv)?;
+            Ok(Box::new(SshLink::open_exec(conn, rows, cols, &command)?) as Box<dyn Link>)
+        });
+        let (mgr, username, name) = (self.clone(), who.username.clone(), server.name.clone());
+        let on_close = Box::new(move |err: Option<&str>| {
+            mgr.audit(&username, "session.close", &name, err.unwrap_or(""));
+        });
+        let title = format!("{} › {} ({})", server.name, container.display_name(), container.runtime);
+        Ok(Terminal::spawn(title, rows, cols, notify, connect, on_close))
+    }
+
     // ---- audit ----
 
     pub fn audit_log(&self, who: &Identity, limit: usize) -> Result<Vec<AuditEntry>> {
         self.authorize(who, Role::Admin)?;
         db::list_audit(&self.db(), limit)
     }
+}
+
+fn validate_group_name(name: &str) -> Result<&str> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(invalid("group name is required"));
+    }
+    if name.chars().count() > 64 {
+        return Err(invalid("group name must be at most 64 characters"));
+    }
+    Ok(name)
 }
 
 fn normalize_server(mut input: ServerInput) -> Result<ServerInput> {
@@ -666,6 +808,42 @@ mod tests {
 
         m.delete_server(&admin, id).unwrap();
         assert!(m.list_servers(&admin).unwrap().is_empty());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn groups() {
+        let (m, dir) = temp_manager("groups");
+        let admin = m.create_initial_admin("admin", "adminpass1").unwrap();
+        let op = m.create_user(&admin, "olga", "operatorpw", Role::Operator).unwrap();
+        let op = m.login(&op.username, "operatorpw").unwrap();
+
+        assert!(matches!(m.create_group(&op, "web"), Err(Error::Forbidden(Role::Admin))));
+        assert!(m.create_group(&admin, "  ").is_err());
+        let web = m.create_group(&admin, " Web ").unwrap();
+        assert_eq!(web.name, "Web");
+        assert!(m.create_group(&admin, "web").is_err(), "names are case-insensitive");
+
+        let server = |group: &str| ServerInput {
+            name: "web1".into(),
+            group: group.into(),
+            ssh: Some(SshConfig { host: "10.0.0.5".into(), ..Default::default() }),
+            ..Default::default()
+        };
+        assert!(m.save_server(&admin, None, server("nope")).is_err(), "unknown group");
+        let id = m.save_server(&admin, None, server("web")).unwrap();
+        assert_eq!(m.get_server(&admin, id).unwrap().group, "Web", "canonical spelling");
+        assert_eq!(m.list_groups(&op).unwrap()[0].server_count, 1);
+
+        m.create_group(&admin, "db").unwrap();
+        assert!(m.rename_group(&admin, web.id, "DB").is_err(), "duplicate name");
+        m.rename_group(&admin, web.id, "frontend").unwrap();
+        assert_eq!(m.get_server(&admin, id).unwrap().group, "frontend");
+
+        m.delete_group(&admin, web.id).unwrap();
+        assert_eq!(m.get_server(&admin, id).unwrap().group, "");
+        let names: Vec<_> = m.list_groups(&admin).unwrap().into_iter().map(|g| g.name).collect();
+        assert_eq!(names, ["db"]);
         std::fs::remove_dir_all(dir).unwrap();
     }
 }

@@ -26,11 +26,11 @@ fn type_into(harness: &mut Harness<'_, GuiApp>, label: &str, text: &str) {
     harness.run();
 }
 
-/// Closes all session and display windows (dropping them disconnects).
+/// Closes all session tabs (dropping them disconnects).
 fn close_windows(harness: &mut Harness<'_, GuiApp>) {
     if let super::Screen::Main(m) = &mut harness.state_mut().screen {
         m.sessions.clear();
-        m.displays.clear();
+        m.focus = None;
     }
     harness.run();
 }
@@ -82,6 +82,9 @@ fn setup_then_manage_servers() {
         }
         None => SshConfig { host: "192.0.2.10".into(), ..Default::default() },
     };
+    for group in ["web", "data"] {
+        mgr.create_group(&who, group).unwrap();
+    }
     for (name, group) in [("web-01", "web"), ("db-01", "data")] {
         let input = ServerInput { name: name.into(), group: group.into(), ssh: Some(ssh.clone()), ..Default::default() };
         mgr.save_server(&who, None, input).unwrap();
@@ -90,6 +93,23 @@ fn setup_then_manage_servers() {
     run_until(&mut harness, Duration::from_secs(3), |_| false);
     harness.get_by_label("web-01");
     screenshot(&mut harness, "02-servers");
+
+    harness.get_by_label("Compact").click();
+    harness.run();
+    harness.get_by_label("Open SSH shell");
+    screenshot(&mut harness, "02b-servers-compact");
+    harness.get_by_label("Cards").click();
+    harness.run();
+
+    // Sessions dock as tabs; the page stays one click away.
+    harness.get_all_by_role_and_label(egui::accesskit::Role::Button, "SSH").next().unwrap().click();
+    run_until(&mut harness, Duration::from_millis(600), |_| false);
+    if let super::Screen::Main(m) = &harness.state().screen {
+        assert_eq!(m.sessions.len(), 1);
+        assert_eq!(m.focus, Some(m.sessions[0].id), "a new session takes the front tab");
+    }
+    screenshot(&mut harness, "02c-docked-session");
+    close_windows(&mut harness);
 
     harness.get_by_label("+ Add server").click();
     harness.run();
@@ -107,8 +127,8 @@ fn setup_then_manage_servers() {
             .unwrap()
             .click();
         run_until(&mut harness, Duration::from_secs(5), |app| match &app.screen {
-            super::Screen::Main(m) => m.sessions.first().is_some_and(|s| {
-                s.term.with_screen(|sc| sc.contents().contains('$') || sc.contents().contains('❯'))
+            super::Screen::Main(m) => m.sessions.first().and_then(|s| s.terminal()).is_some_and(|t| {
+                t.with_screen(|sc| sc.contents().contains('$') || sc.contents().contains('❯'))
             }),
             _ => false,
         });
@@ -133,7 +153,7 @@ fn setup_then_manage_servers() {
             modifiers: egui::Modifiers::NONE,
         });
         let has_output = |app: &GuiApp| match &app.screen {
-            super::Screen::Main(m) => m.sessions[0].term.with_screen(|sc| sc.contents().contains("gui-42")),
+            super::Screen::Main(m) => m.sessions[0].terminal().unwrap().with_screen(|sc| sc.contents().contains("gui-42")),
             _ => false,
         };
         run_until(&mut harness, Duration::from_secs(5), has_output);
@@ -156,14 +176,14 @@ fn setup_then_manage_servers() {
         mgr.save_server(&who, None, input).unwrap();
         harness.get_by_label("⟳ Refresh").click();
         harness.run();
-        // vm-console sorts first (empty group); its VNC button is the only enabled one.
+        // vm-console is the only server with VNC, so its button is the only one.
         harness
             .get_all_by_role_and_label(egui::accesskit::Role::Button, "VNC")
             .find(|b| !b.accesskit_node().is_disabled())
             .expect("an enabled VNC button")
             .click();
         let has_frame = |app: &GuiApp| match &app.screen {
-            super::Screen::Main(m) => m.displays.first().is_some_and(|d| {
+            super::Screen::Main(m) => m.sessions.iter().find_map(|s| s.vnc()).is_some_and(|d| {
                 d.session.with_framebuffer(|fb| fb.generation > 0)
             }),
             _ => false,
@@ -176,7 +196,7 @@ fn setup_then_manage_servers() {
             // The guest echoes keys: click into the display and type through egui.
             run_until(&mut harness, Duration::from_millis(1500), |_| false);
             let pixels = |app: &GuiApp| match &app.screen {
-                super::Screen::Main(m) => m.displays[0].session.with_framebuffer(|fb| fb.pixels.clone()),
+                super::Screen::Main(m) => m.sessions.iter().find_map(|s| s.vnc()).unwrap().session.with_framebuffer(|fb| fb.pixels.clone()),
                 _ => Vec::new(),
             };
             let before = pixels(harness.state());
@@ -206,6 +226,12 @@ fn setup_then_manage_servers() {
     harness.run();
     harness.get_by_label("admin (you)");
     screenshot(&mut harness, "05-users");
+
+    harness.get_by_label("Settings").click();
+    harness.run();
+    harness.get_by_label("Server groups");
+    harness.get_by_label("web");
+    screenshot(&mut harness, "07-settings");
 
     std::fs::remove_dir_all(dir).unwrap();
 }

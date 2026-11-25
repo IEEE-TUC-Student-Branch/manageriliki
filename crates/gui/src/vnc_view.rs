@@ -1,4 +1,4 @@
-//! A VNC viewer window: renders the remote framebuffer as a texture and
+//! A VNC viewer: renders the remote framebuffer as a texture and
 //! forwards pointer and keyboard input.
 
 use eframe::egui::{
@@ -10,7 +10,6 @@ use manageriliki_core::{VncSession, VncState, keysym};
 pub struct VncView {
     pub id: u64,
     pub session: VncSession,
-    pub open: bool,
     texture: Option<TextureHandle>,
     size_generation: u64,
     fit: bool,
@@ -24,7 +23,6 @@ impl VncView {
         VncView {
             id,
             session,
-            open: true,
             texture: None,
             size_generation: u64::MAX,
             fit: true,

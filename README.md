@@ -13,6 +13,10 @@ with built-in **user accounts and roles**.
   displays, either direct or **tunneled through the server's SSH** (encrypted,
   and reaches VNC servers that only listen on localhost)
 - Run a command over SSH on one server, a whole group, or every server at once
+- Container view per server for **Docker**, **Podman**, **LXC** (Incus, LXD,
+  Proxmox `pct`, plain `lxc-*`) and **Kubernetes** (kubectl, k3s, MicroK8s):
+  state, image, ports, and the services of each container, plus start / stop /
+  restart, logs and a shell inside it
 - Accounts with three roles, enforced in the core library on every call:
 
   | Role     | See servers | Connect / run commands | Manage servers, users, audit log |
@@ -80,6 +84,27 @@ wayvnc 127.0.0.1 5900                   # Wayland (wlroots) desktop
 qemu-system-x86_64 ... -vnc 127.0.0.1:1 # VM console on port 5901
 ```
 
+## Containers
+
+Open **Containers** on a server (GUI button, or `t` in the TUI). Everything
+runs over the server's SSH with the runtimes' own CLIs; nothing is installed
+on the server. The tools found on `PATH` (plus `/usr/sbin`, `/sbin`,
+`/snap/bin`) are used:
+
+| Runtime    | Tools                                  | Services shown for a container                |
+|------------|----------------------------------------|-----------------------------------------------|
+| Docker     | `docker`                               | published ports and running processes (`top`) |
+| Podman     | `podman`                               | published ports and running processes (`top`) |
+| LXC        | `incus`, `lxc` (LXD), `pct`, `lxc-ls`  | systemd services inside, else processes       |
+| Kubernetes | `kubectl`, `k3s kubectl`, `microk8s kubectl` | the pod's containers and the Services selecting it |
+
+If a tool is refused for lack of privileges (not in the `docker` group, k3s'
+root-only kubeconfig, …), it is retried once with `sudo -n`, so passwordless
+sudo for that tool is enough. Kubernetes pods can't be started or stopped;
+"Delete pod" makes their controller recreate them. Container actions, log
+views and shells are recorded in the audit log. Connecting to containers needs
+the same role as connecting to the server.
+
 ## Serial ports
 
 Your Linux user needs access to the device. On Arch that means the `uucp`
@@ -97,6 +122,7 @@ sudo usermod -aG uucp "$USER"   # then log out and back in
 | Enter or `s`        | SSH shell                                       |
 | `c`                 | Serial console                                  |
 | `v`                 | VNC (shows a hint: the viewer is in the GUI)    |
+| `t`                 | Containers (Docker, Podman, LXC, Kubernetes)    |
 | `x`                 | Run a command (this server, its group, or all)  |
 | `a` `e` `d`         | Add / edit / delete                             |
 | `h`                 | Forget a server's trusted host key              |
@@ -104,12 +130,16 @@ sudo usermod -aG uucp "$USER"   # then log out and back in
 | `w`                 | Change my password                              |
 | `o` / `q`           | Log out / quit                                  |
 | Ctrl+] or F12       | Leave a session                                 |
+
+In the containers view: Tab cycles the runtime filter, Enter/`l` shows logs,
+`s` opens a shell, `u` / `x` / `R` start / stop / restart, PgUp/PgDn scroll
+the services, Esc goes back.
 | Shift+PgUp/PgDn     | Scroll back in a session                        |
 
 ## Layout
 
 ```
-crates/core   storage, accounts, vault, audit, SSH/serial transports, terminal sessions
+crates/core   storage, accounts, vault, audit, SSH/serial transports, terminal sessions, containers
 crates/tui    ratatui frontend
 crates/gui    egui/eframe frontend
 ```

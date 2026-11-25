@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use manageriliki_core::{
-    AuditEntry, CommandOutput, FlowControl, Identity, Manager, Parity, Result as CoreResult,
+    AuditEntry, CommandOutput, FlowControl, Group, Identity, Manager, Parity, Result as CoreResult,
     Role, SecretUpdate, SerialConfig, Server, ServerInput, SshAuth, SshConfig, Status,
     StatusMonitor, Terminal, TransportKind, User, VncConfig,
 };
@@ -13,11 +13,13 @@ use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Cell, Clear, Paragraph, Row, Table, TableState, Tabs, Wrap};
 
+use crate::containers_view::{self, ContainersScreen};
 use crate::form::{Form, FormResult, centered};
 use crate::term_view;
 
 const BAUD_RATES: [u32; 10] = [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200, 230400, 921600];
 const ON: &[&str] = &["on"];
+const NO_GROUP: &str = "(none)";
 
 pub enum Outcome {
     Stay,
@@ -30,17 +32,20 @@ enum Tab {
     Servers,
     Users,
     Audit,
+    Settings,
 }
 
 enum Confirm {
     DeleteServer(i64),
     DeleteUser(i64),
+    DeleteGroup(i64),
     ResetHostKey(i64),
 }
 
 enum Modal {
     Server { id: Option<i64>, form: Form },
     User { id: Option<i64>, form: Form },
+    Group { id: Option<i64>, form: Form },
     Password { user_id: Option<i64>, form: Form },
     Command { server: Box<Server>, form: Form },
     Confirm { message: String, action: Confirm },
@@ -61,11 +66,14 @@ pub struct MainView {
     server_state: TableState,
     users: Vec<User>,
     user_state: TableState,
+    groups: Vec<Group>,
+    group_state: TableState,
     audit: Vec<AuditEntry>,
     audit_state: TableState,
     monitor: StatusMonitor,
     modal: Option<Modal>,
     terminal: Option<Terminal>,
+    containers: Option<ContainersScreen>,
     job: Option<Job>,
     flash: Option<(String, bool)>,
 }
@@ -80,11 +88,14 @@ impl MainView {
             server_state: TableState::default().with_selected(0),
             users: Vec::new(),
             user_state: TableState::default().with_selected(0),
+            groups: Vec::new(),
+            group_state: TableState::default().with_selected(0),
             audit: Vec::new(),
             audit_state: TableState::default().with_selected(0),
             monitor: StatusMonitor::start(Duration::from_secs(20), Arc::new(|| {})),
             modal: None,
             terminal: None,
+            containers: None,
             job: None,
             flash: None,
         };
@@ -121,6 +132,10 @@ impl MainView {
                 Ok(users) => self.users = users,
                 Err(e) => self.error(e),
             }
+            match self.mgr.list_groups(&self.who) {
+                Ok(groups) => self.groups = groups,
+                Err(e) => self.error(e),
+            }
             match self.mgr.audit_log(&self.who, 500) {
                 Ok(audit) => self.audit = audit,
                 Err(e) => self.error(e),
@@ -130,6 +145,7 @@ impl MainView {
         }
         clamp(&mut self.server_state, self.servers.len());
         clamp(&mut self.user_state, self.users.len());
+        clamp(&mut self.group_state, self.groups.len());
         clamp(&mut self.audit_state, self.audit.len());
     }
 
@@ -141,8 +157,15 @@ impl MainView {
         self.user_state.selected().and_then(|i| self.users.get(i))
     }
 
+    fn selected_group(&self) -> Option<&Group> {
+        self.group_state.selected().and_then(|i| self.groups.get(i))
+    }
+
     /// Collects finished command results into the output dialog.
     pub fn tick(&mut self) {
+        if let Some(screen) = &mut self.containers {
+            screen.tick();
+        }
         let Some(job) = &mut self.job else { return };
         while let Ok((name, result)) = job.rx.try_recv() {
             job.pending -= 1;
@@ -183,7 +206,9 @@ impl MainView {
         if let Some(term) = &self.terminal {
             if term.is_closed() || term_view::is_detach_key(&key) {
                 self.terminal = None;
-                self.reload();
+                if self.containers.is_none() {
+                    self.reload();
+                }
             } else if key.modifiers.contains(KeyModifiers::SHIFT) && key.code == KeyCode::PageUp {
                 term.scroll(10);
             } else if key.modifiers.contains(KeyModifiers::SHIFT) && key.code == KeyCode::PageDown {
@@ -198,6 +223,21 @@ impl MainView {
         }
         if let Some(modal) = self.modal.take() {
             self.modal = self.on_modal_key(modal, key);
+            return Outcome::Stay;
+        }
+        if let Some(screen) = &mut self.containers {
+            match screen.on_key(key) {
+                containers_view::Outcome::Stay => {}
+                containers_view::Outcome::Close => self.containers = None,
+                containers_view::Outcome::Shell(c) => {
+                    let server_id = screen.server.id;
+                    let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
+                    match self.mgr.open_container_shell(&self.who, server_id, &c, rows.saturating_sub(1), cols, Arc::new(|| {})) {
+                        Ok(term) => self.terminal = Some(term),
+                        Err(e) => screen.show_error(e),
+                    }
+                }
+            }
             return Outcome::Stay;
         }
         self.flash = None;
@@ -226,10 +266,12 @@ impl MainView {
             KeyCode::Char('1') => self.switch_tab(Tab::Servers),
             KeyCode::Char('2') if self.is_admin() => self.switch_tab(Tab::Users),
             KeyCode::Char('3') if self.is_admin() => self.switch_tab(Tab::Audit),
+            KeyCode::Char('4') if self.is_admin() => self.switch_tab(Tab::Settings),
             KeyCode::Tab if self.is_admin() => self.switch_tab(match self.tab {
                 Tab::Servers => Tab::Users,
                 Tab::Users => Tab::Audit,
-                Tab::Audit => Tab::Servers,
+                Tab::Audit => Tab::Settings,
+                Tab::Settings => Tab::Servers,
             }),
             KeyCode::Up | KeyCode::Char('k') => self.move_selection(-1),
             KeyCode::Down | KeyCode::Char('j') => self.move_selection(1),
@@ -238,6 +280,7 @@ impl MainView {
             _ => match self.tab {
                 Tab::Servers => self.on_servers_key(key),
                 Tab::Users => self.on_users_key(key),
+                Tab::Settings => self.on_settings_key(key),
                 Tab::Audit => {}
             },
         }
@@ -254,6 +297,7 @@ impl MainView {
             Tab::Servers => (&mut self.server_state, self.servers.len()),
             Tab::Users => (&mut self.user_state, self.users.len()),
             Tab::Audit => (&mut self.audit_state, self.audit.len()),
+            Tab::Settings => (&mut self.group_state, self.groups.len()),
         };
         if len == 0 {
             return;
@@ -270,10 +314,10 @@ impl MainView {
         }
         match (key.code, selected) {
             (KeyCode::Char('a'), _) => {
-                self.modal = Some(Modal::Server { id: None, form: server_form(None) })
+                self.modal = Some(Modal::Server { id: None, form: server_form(None, &self.groups) })
             }
             (KeyCode::Char('e'), Some(s)) => {
-                self.modal = Some(Modal::Server { id: Some(s.id), form: server_form(Some(&s)) })
+                self.modal = Some(Modal::Server { id: Some(s.id), form: server_form(Some(&s), &self.groups) })
             }
             (KeyCode::Char('d'), Some(s)) => {
                 self.modal = Some(Modal::Confirm {
@@ -292,6 +336,15 @@ impl MainView {
             }
             (KeyCode::Enter | KeyCode::Char('s'), Some(s)) => self.open_session(&s, TransportKind::Ssh),
             (KeyCode::Char('c'), Some(s)) => self.open_session(&s, TransportKind::Serial),
+            (KeyCode::Char('t'), Some(s)) => {
+                if s.ssh.is_none() {
+                    self.error(format!("{} has no SSH configuration", s.name));
+                } else if self.who.role < s.required_role {
+                    self.error(format!("connecting to {} requires the {} role", s.name, s.required_role));
+                } else {
+                    self.containers = Some(ContainersScreen::new(self.mgr.clone(), self.who.clone(), s));
+                }
+            }
             (KeyCode::Char('v'), Some(s)) => {
                 if s.vnc.is_some() {
                     self.info(format!("VNC displays need graphics: open '{}' in manageriliki-gui", s.name));
@@ -356,6 +409,33 @@ impl MainView {
         }
     }
 
+    fn on_settings_key(&mut self, key: KeyEvent) {
+        match (key.code, self.selected_group().cloned()) {
+            (KeyCode::Char('a'), _) => {
+                self.modal = Some(Modal::Group {
+                    id: None,
+                    form: Form::new("New server group").text("name", "Name", ""),
+                })
+            }
+            (KeyCode::Char('e'), Some(g)) => {
+                self.modal = Some(Modal::Group {
+                    id: Some(g.id),
+                    form: Form::new(format!("Rename group {}", g.name))
+                        .hint("Servers in this group move to the new name.")
+                        .text("name", "Name", g.name),
+                })
+            }
+            (KeyCode::Char('d'), Some(g)) => {
+                let message = match g.server_count {
+                    0 => format!("Delete group '{}'?", g.name),
+                    n => format!("Delete group '{}'? Its {n} server(s) are kept, without a group.", g.name),
+                };
+                self.modal = Some(Modal::Confirm { message, action: Confirm::DeleteGroup(g.id) })
+            }
+            _ => {}
+        }
+    }
+
     fn open_session(&mut self, server: &Server, kind: TransportKind) {
         let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
         let notify = Arc::new(|| {});
@@ -387,6 +467,7 @@ impl MainView {
                     let result = match action {
                         Confirm::DeleteServer(id) => self.mgr.delete_server(&self.who, id),
                         Confirm::DeleteUser(id) => self.mgr.delete_user(&self.who, id),
+                        Confirm::DeleteGroup(id) => self.mgr.delete_group(&self.who, id),
                         Confirm::ResetHostKey(id) => self.mgr.reset_host_key(&self.who, id),
                     };
                     match result {
@@ -420,6 +501,17 @@ impl MainView {
                 Ok(())
             })
             .then_some(Modal::User { id, form }),
+            Modal::Group { id, mut form } => self.form_step(&mut form, key, |v, form| {
+                let name = form.get("name");
+                match id {
+                    None => v.mgr.create_group(&v.who, &name).map(|_| ()),
+                    Some(id) => v.mgr.rename_group(&v.who, id, &name),
+                }
+                .map_err(|e| e.to_string())?;
+                v.info("group saved");
+                Ok(())
+            })
+            .then_some(Modal::Group { id, form }),
             Modal::Password { user_id, mut form } => self.form_step(&mut form, key, |v, form| {
                 if form.get("new") != form.get("confirm") {
                     return Err("passwords do not match".into());
@@ -502,6 +594,10 @@ impl MainView {
             term_view::render(frame, frame.area(), term);
             return;
         }
+        if let Some(screen) = &mut self.containers {
+            screen.draw(frame, frame.area());
+            return;
+        }
         let [header, body, footer] = Layout::vertical([
             Constraint::Length(1),
             Constraint::Fill(1),
@@ -511,7 +607,7 @@ impl MainView {
 
         let mut titles = vec!["1 Servers"];
         if self.is_admin() {
-            titles.extend(["2 Users", "3 Audit"]);
+            titles.extend(["2 Users", "3 Audit", "4 Settings"]);
         }
         let [tabs_area, who_area] =
             Layout::horizontal([Constraint::Fill(1), Constraint::Length(40)]).areas(header);
@@ -533,6 +629,7 @@ impl MainView {
             Tab::Servers => self.draw_servers(frame, body),
             Tab::Users => self.draw_users(frame, body),
             Tab::Audit => self.draw_audit(frame, body),
+            Tab::Settings => self.draw_settings(frame, body),
         }
 
         let footer_line = match &self.flash {
@@ -550,14 +647,15 @@ impl MainView {
     fn key_hints(&self) -> String {
         let hints = match (self.tab, self.who.role) {
             (Tab::Servers, Role::Admin) => {
-                " Enter/s ssh · c serial · x run · a add · e edit · d delete · h reset hostkey · r refresh · ? help · q quit"
+                " Enter/s ssh · c serial · t containers · x run · a add · e edit · d delete · h reset hostkey · r refresh · ? help · q quit"
             }
             (Tab::Servers, Role::Operator) => {
-                " Enter/s ssh · c serial · x run command · r refresh · w password · o logout · ? help · q quit"
+                " Enter/s ssh · c serial · t containers · x run · r refresh · w password · o logout · ? help · q quit"
             }
             (Tab::Servers, Role::Viewer) => " r refresh · w password · o logout · ? help · q quit",
             (Tab::Users, _) => " a add · e edit role/disabled · p reset password · d delete · ? help · q quit",
             (Tab::Audit, _) => " ↑↓ scroll · r refresh · ? help · q quit",
+            (Tab::Settings, _) => " a add group · e rename · d delete · r refresh · ? help · q quit",
         };
         hints.to_string()
     }
@@ -690,6 +788,25 @@ impl MainView {
         frame.render_stateful_widget(table, area, &mut self.user_state);
     }
 
+    fn draw_settings(&mut self, frame: &mut Frame, area: Rect) {
+        let [table_area, help_area] =
+            Layout::vertical([Constraint::Fill(1), Constraint::Length(3)]).areas(area);
+        let rows = self.groups.iter().map(|g| {
+            Row::new(vec![Cell::from(g.name.clone()).bold(), Cell::from(g.server_count.to_string())])
+        });
+        let table = Table::new(rows, [Constraint::Fill(1), Constraint::Length(9)])
+            .header(Row::new(["Group", "Servers"]).bold().underlined())
+            .row_highlight_style(Style::new().bg(Color::DarkGray))
+            .block(Block::bordered().title(format!(" Settings › Server groups ({}) ", self.groups.len())));
+        frame.render_stateful_widget(table, table_area, &mut self.group_state);
+        let help = if self.groups.is_empty() {
+            "No groups yet. Press 'a' to add one; it is then offered in the server form."
+        } else {
+            "Groups are offered in the server form; 'x' on a server can run a command on its whole group."
+        };
+        frame.render_widget(Paragraph::new(help).dim().wrap(Wrap { trim: true }).block(Block::bordered()), help_area);
+    }
+
     fn draw_audit(&mut self, frame: &mut Frame, area: Rect) {
         let rows = self.audit.iter().map(|a| {
             let color = if a.action.contains("fail") || a.action.contains("mismatch") {
@@ -736,6 +853,7 @@ fn draw_modal(frame: &mut Frame, modal: &Modal) {
     match modal {
         Modal::Server { form, .. }
         | Modal::User { form, .. }
+        | Modal::Group { form, .. }
         | Modal::Password { form, .. }
         | Modal::Command { form, .. } => form.render(frame, area),
         Modal::Confirm { message, .. } => {
@@ -766,16 +884,21 @@ fn draw_modal(frame: &mut Frame, modal: &Modal) {
         Modal::Help => {
             let text = vec![
                 Line::from("Global").bold(),
-                Line::from("  1/2/3, Tab   switch tabs (Users/Audit are admin-only)"),
+                Line::from("  1/2/3/4, Tab switch tabs (Users/Audit/Settings are admin-only)"),
                 Line::from("  ↑↓ j k       move selection        r  refresh"),
                 Line::from("  w            change my password    o  log out     q  quit"),
                 Line::default(),
                 Line::from("Servers").bold(),
                 Line::from("  Enter, s     SSH shell             c  serial console"),
                 Line::from("  v            VNC display (opens in manageriliki-gui)"),
+                Line::from("  t            containers: Docker, Podman, LXC, Kubernetes"),
                 Line::from("  x            run a command on this server, its group, or all"),
                 Line::from("  a / e / d    add / edit / delete (admin)"),
                 Line::from("  h            forget trusted SSH host key (admin)"),
+                Line::default(),
+                Line::from("Containers").bold(),
+                Line::from("  Tab runtime filter · Enter/l logs · s shell · u start · x stop"),
+                Line::from("  R restart (pods: delete) · PgUp/PgDn services · Esc back"),
                 Line::default(),
                 Line::from("Sessions").bold(),
                 Line::from("  Ctrl+] or F12        close the session"),
@@ -783,6 +906,9 @@ fn draw_modal(frame: &mut Frame, modal: &Modal) {
                 Line::default(),
                 Line::from("Users (admin)").bold(),
                 Line::from("  a add · e edit role/disabled · p reset password · d delete"),
+                Line::default(),
+                Line::from("Settings (admin)").bold(),
+                Line::from("  server groups: a add · e rename · d delete"),
             ];
             let popup = centered(area, 72.min(area.width), text.len() as u16 + 2);
             frame.render_widget(Clear, popup);
@@ -794,8 +920,18 @@ fn draw_modal(frame: &mut Frame, modal: &Modal) {
     }
 }
 
-fn server_form(server: Option<&Server>) -> Form {
+fn server_form(server: Option<&Server>, groups: &[Group]) -> Form {
     let input = server.map(ServerInput::from_server).unwrap_or_default();
+    let mut group_names = vec![NO_GROUP.to_string()];
+    group_names.extend(groups.iter().map(|g| g.name.clone()));
+    if !input.group.is_empty() && !groups.iter().any(|g| g.name.eq_ignore_ascii_case(&input.group)) {
+        group_names.push(input.group.clone());
+    }
+    let group = groups
+        .iter()
+        .find(|g| g.name.eq_ignore_ascii_case(&input.group))
+        .map_or(input.group.as_str(), |g| g.name.as_str());
+    let group = if group.is_empty() { NO_GROUP } else { group };
     let ssh = input.ssh.clone().unwrap_or_default();
     let serial = input.serial.clone().unwrap_or_default();
     let key_path = match &ssh.auth {
@@ -814,7 +950,7 @@ fn server_form(server: Option<&Server>) -> Form {
     Form::new(if server.is_some() { "Edit server" } else { "New server" })
         .hint(hint)
         .text("name", "Name", input.name)
-        .text("group", "Group", input.group)
+        .choice("group", "Group (see Settings)", group_names, group)
         .text("notes", "Notes", input.notes)
         .choice("role", "Who may connect", ["operator", "admin"], input.required_role.as_str())
         .toggle("ssh", "SSH", input.ssh.is_some())
@@ -917,7 +1053,7 @@ fn read_server_form(form: &Form) -> std::result::Result<ServerInput, String> {
     let vnc_secret = form.get("vnc_secret");
     Ok(ServerInput {
         name: form.get("name"),
-        group: form.get("group"),
+        group: Some(form.get("group")).filter(|g| g != NO_GROUP).unwrap_or_default(),
         notes: form.get("notes"),
         ssh,
         serial,

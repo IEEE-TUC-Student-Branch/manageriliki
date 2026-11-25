@@ -1,3 +1,4 @@
+mod containers_view;
 mod form;
 mod main_view;
 mod term_view;
