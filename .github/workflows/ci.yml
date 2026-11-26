@@ -24,7 +24,7 @@ jobs:
     name: Formatting
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
@@ -34,7 +34,7 @@ jobs:
     name: Clippy
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends $APT_PACKAGES
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -46,7 +46,7 @@ jobs:
     name: Build and test
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       # Mesa's software Vulkan driver lets the headless GUI test render screenshots.
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends $APT_PACKAGES mesa-vulkan-drivers
       - uses: dtolnay/rust-toolchain@stable
@@ -74,7 +74,7 @@ jobs:
     name: Release build
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends $APT_PACKAGES
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -86,7 +86,7 @@ jobs:
     name: Docs
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends $APT_PACKAGES
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2

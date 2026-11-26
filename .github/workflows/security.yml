@@ -25,7 +25,7 @@ jobs:
     # Don't block unrelated PRs on an advisory published today; the weekly run reports it.
     continue-on-error: ${{ matrix.check == 'advisories' && github.event_name == 'pull_request' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check ${{ matrix.check }}
@@ -36,7 +36,7 @@ jobs:
     env:
       GITLEAKS_VERSION: 8.18.4
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Install gitleaks
@@ -50,7 +50,7 @@ jobs:
     name: No unsafe code
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Every crate root forbids unsafe
         run: |
           fail=0
