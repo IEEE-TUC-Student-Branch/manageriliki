@@ -3,9 +3,9 @@
 use std::io::{self, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, TryRecvError};
-use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
@@ -55,13 +55,8 @@ pub fn ssh_connect(
     session.set_timeout(15_000);
     session.handshake()?;
 
-    let hash = session
-        .host_key_hash(HashType::Sha256)
-        .ok_or_else(|| invalid("server did not present a host key"))?;
-    let fingerprint = format!(
-        "SHA256:{}",
-        base64::engine::general_purpose::STANDARD_NO_PAD.encode(hash)
-    );
+    let hash = session.host_key_hash(HashType::Sha256).ok_or_else(|| invalid("server did not present a host key"))?;
+    let fingerprint = format!("SHA256:{}", base64::engine::general_purpose::STANDARD_NO_PAD.encode(hash));
     check_host_key(&fingerprint)?;
 
     match &cfg.auth {
@@ -70,9 +65,7 @@ pub fn ssh_connect(
             let password = secret.ok_or_else(|| invalid("no password is stored for this server"))?;
             session.userauth_password(&cfg.username, password)?
         }
-        SshAuth::Key { path } => {
-            session.userauth_pubkey_file(&cfg.username, None, &expand_tilde(path), secret)?
-        }
+        SshAuth::Key { path } => session.userauth_pubkey_file(&cfg.username, None, &expand_tilde(path), secret)?,
     }
     if !session.authenticated() {
         return Err(invalid("SSH authentication failed"));
@@ -82,9 +75,9 @@ pub fn ssh_connect(
 
 fn expand_tilde(path: &str) -> PathBuf {
     match path.strip_prefix("~/") {
-        Some(rest) => directories::BaseDirs::new()
-            .map(|d| d.home_dir().join(rest))
-            .unwrap_or_else(|| PathBuf::from(path)),
+        Some(rest) => {
+            directories::BaseDirs::new().map(|d| d.home_dir().join(rest)).unwrap_or_else(|| PathBuf::from(path))
+        }
         None => PathBuf::from(path),
     }
 }
@@ -140,9 +133,9 @@ impl SshLink {
     /// Forwards a TCP connection to `host:port` as seen from the SSH server.
     pub fn open_tunnel(conn: SshConnection, host: &str, port: u16) -> Result<Self> {
         let session = conn.session;
-        let channel = session.channel_direct_tcpip(host, port, None).map_err(|e| {
-            invalid(format!("SSH tunnel to {host}:{port} failed: {e} (is TCP forwarding allowed?)"))
-        })?;
+        let channel = session
+            .channel_direct_tcpip(host, port, None)
+            .map_err(|e| invalid(format!("SSH tunnel to {host}:{port} failed: {e} (is TCP forwarding allowed?)")))?;
         session.set_blocking(false);
         Ok(SshLink { session, channel, has_pty: false })
     }
@@ -185,9 +178,7 @@ impl Link for SshLink {
         while !data.is_empty() {
             match self.channel.write(data) {
                 Ok(n) => data = &data[n..],
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                    thread::sleep(Duration::from_millis(2))
-                }
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => thread::sleep(Duration::from_millis(2)),
                 Err(e) => return Err(e),
             }
         }
@@ -200,10 +191,7 @@ impl Link for SshLink {
         if !self.has_pty {
             return Ok(());
         }
-        again(|| {
-            self.channel
-                .request_pty_size(cols as u32, rows as u32, None, None)
-        })
+        again(|| self.channel.request_pty_size(cols as u32, rows as u32, None, None))
     }
 }
 
@@ -222,10 +210,7 @@ pub struct TcpLink {
 
 impl TcpLink {
     pub fn connect(host: &str, port: u16) -> Result<Self> {
-        let addr = (host, port)
-            .to_socket_addrs()?
-            .next()
-            .ok_or_else(|| invalid(format!("cannot resolve {host}")))?;
+        let addr = (host, port).to_socket_addrs()?.next().ok_or_else(|| invalid(format!("cannot resolve {host}")))?;
         let stream = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT)
             .map_err(|e| invalid(format!("cannot connect to {host}:{port}: {e}")))?;
         stream.set_nodelay(true)?;
@@ -248,9 +233,7 @@ impl Link for TcpLink {
         while !data.is_empty() {
             match self.stream.write(data) {
                 Ok(n) => data = &data[n..],
-                Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
-                    thread::sleep(Duration::from_millis(1))
-                }
+                Err(e) if e.kind() == io::ErrorKind::WouldBlock => thread::sleep(Duration::from_millis(1)),
                 Err(e) => return Err(e),
             }
         }
@@ -293,11 +276,7 @@ impl Read for PumpReader {
 /// Drives a non-blocking link on its own thread so a protocol can be written
 /// with plain blocking reads, while bytes queued on `outgoing` are sent.
 /// The pump stops when `stop` is set, the link closes, or the reader is dropped.
-pub fn pump(
-    mut link: Box<dyn Link>,
-    outgoing: Receiver<Vec<u8>>,
-    stop: Arc<AtomicBool>,
-) -> PumpReader {
+pub fn pump(mut link: Box<dyn Link>, outgoing: Receiver<Vec<u8>>, stop: Arc<AtomicBool>) -> PumpReader {
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
         let mut buf = vec![0u8; 64 * 1024];
@@ -320,9 +299,7 @@ pub fn pump(
             let mut next = if busy {
                 outgoing.try_recv().map_err(|e| e == TryRecvError::Disconnected)
             } else {
-                outgoing
-                    .recv_timeout(Duration::from_millis(5))
-                    .map_err(|e| e == RecvTimeoutError::Disconnected)
+                outgoing.recv_timeout(Duration::from_millis(5)).map_err(|e| e == RecvTimeoutError::Disconnected)
             };
             loop {
                 match next {
@@ -395,9 +372,7 @@ impl Link for SerialLink {
         match self.port.read(buf) {
             Ok(0) => Ok(ReadOutcome::Idle),
             Ok(n) => Ok(ReadOutcome::Data(n)),
-            Err(e) if matches!(e.kind(), io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock) => {
-                Ok(ReadOutcome::Idle)
-            }
+            Err(e) if matches!(e.kind(), io::ErrorKind::TimedOut | io::ErrorKind::WouldBlock) => Ok(ReadOutcome::Idle),
             Err(e) => Err(e),
         }
     }

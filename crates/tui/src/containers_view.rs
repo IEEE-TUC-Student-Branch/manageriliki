@@ -7,8 +7,8 @@ use std::time::{Duration, Instant};
 
 use crossterm::event::{KeyCode, KeyEvent};
 use manageriliki_core::{
-    Container, ContainerAction, ContainerList, ContainerService, Identity, Manager,
-    Result as CoreResult, Runtime, Server,
+    Container, ContainerAction, ContainerList, ContainerService, Identity, Manager, Result as CoreResult, Runtime,
+    Server,
 };
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -98,11 +98,7 @@ impl ContainersScreen {
 
     fn visible(&self) -> Vec<&Container> {
         match &self.list {
-            Some(Ok(list)) => list
-                .containers
-                .iter()
-                .filter(|c| self.runtime.is_none_or(|r| c.runtime == r))
-                .collect(),
+            Some(Ok(list)) => list.containers.iter().filter(|c| self.runtime.is_none_or(|r| c.runtime == r)).collect(),
             _ => Vec::new(),
         }
     }
@@ -307,13 +303,9 @@ impl ContainersScreen {
     // ---- drawing ----
 
     pub fn draw(&mut self, frame: &mut Frame, area: Rect) {
-        let [header, list_area, services_area, footer] = Layout::vertical([
-            Constraint::Length(1),
-            Constraint::Fill(1),
-            Constraint::Fill(1),
-            Constraint::Length(1),
-        ])
-        .areas(area);
+        let [header, list_area, services_area, footer] =
+            Layout::vertical([Constraint::Length(1), Constraint::Fill(1), Constraint::Fill(1), Constraint::Length(1)])
+                .areas(area);
 
         let mut head = vec![format!(" Containers on {} ", self.server.name).bold().cyan()];
         if let Some(Ok(list)) = &self.list {
@@ -353,14 +345,12 @@ impl ContainersScreen {
             let popup = centered(area, area.width.saturating_sub(4), area.height.saturating_sub(2));
             frame.render_widget(Clear, popup);
             frame.render_widget(
-                Paragraph::new(logs.text.clone().unwrap_or_else(|| "loading…".into()))
-                    .scroll((logs.scroll, 0))
-                    .block(
-                        Block::bordered()
-                            .title(format!(" {} ", logs.title))
-                            .title_bottom(Line::from(" ↑↓/PgUp/PgDn scroll · g top · any other key closes ").dim())
-                            .border_style(Style::new().fg(Color::Cyan)),
-                    ),
+                Paragraph::new(logs.text.clone().unwrap_or_else(|| "loading…".into())).scroll((logs.scroll, 0)).block(
+                    Block::bordered()
+                        .title(format!(" {} ", logs.title))
+                        .title_bottom(Line::from(" ↑↓/PgUp/PgDn scroll · g top · any other key closes ").dim())
+                        .border_style(Style::new().fg(Color::Cyan)),
+                ),
                 popup,
             );
         }

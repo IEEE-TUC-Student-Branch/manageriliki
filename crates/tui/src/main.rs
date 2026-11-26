@@ -1,3 +1,5 @@
+#![forbid(unsafe_code)]
+
 mod containers_view;
 mod form;
 mod main_view;
@@ -133,13 +135,9 @@ impl App {
     fn draw(&mut self, frame: &mut Frame) {
         match &mut self.screen {
             Screen::Setup(form) | Screen::Login(form) => {
-                let [area, footer] =
-                    Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(frame.area());
+                let [area, footer] = Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(frame.area());
                 form.render(frame, area);
-                frame.render_widget(
-                    Line::from(format!(" data: {}", self.mgr.data_dir().display())).dim(),
-                    footer,
-                );
+                frame.render_widget(Line::from(format!(" data: {}", self.mgr.data_dir().display())).dim(), footer);
             }
             Screen::Main(main) => main.draw(frame),
         }

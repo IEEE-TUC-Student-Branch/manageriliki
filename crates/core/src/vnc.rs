@@ -137,11 +137,10 @@ impl VncSession {
             let result = (|| -> Result<(), String> {
                 let link = connect().map_err(|e| e.to_string())?;
                 let mut reader = transport::pump(link, out_rx, stop);
-                run(&mut reader, &w_out, password.as_deref(), &w_shared, &notify)
-                    .map_err(|e| match e.kind() {
-                        io::ErrorKind::UnexpectedEof => "the VNC server closed the connection".to_string(),
-                        _ => e.to_string(),
-                    })
+                run(&mut reader, &w_out, password.as_deref(), &w_shared, &notify).map_err(|e| match e.kind() {
+                    io::ErrorKind::UnexpectedEof => "the VNC server closed the connection".to_string(),
+                    _ => e.to_string(),
+                })
             })();
             // A deliberate disconnect also ends with EOF; don't report it as an error.
             let err = result.err().filter(|_| !w_shared.stop.load(Ordering::Relaxed));
@@ -316,11 +315,7 @@ fn update_request(incremental: bool, w: u16, h: u16) -> Vec<u8> {
 }
 
 /// Performs the handshake and returns `(width, height, desktop name)`.
-fn handshake(
-    r: &mut impl Read,
-    w: &Sender<Vec<u8>>,
-    password: Option<&str>,
-) -> io::Result<(u16, u16, String)> {
+fn handshake(r: &mut impl Read, w: &Sender<Vec<u8>>, password: Option<&str>) -> io::Result<(u16, u16, String)> {
     let send = |m: Vec<u8>| w.send(m).map_err(|_| proto_err("connection closed"));
 
     let version = read_bytes(r, 12)?;
@@ -381,16 +376,15 @@ fn handshake(
         }
         t => return Err(proto_err(format!("unsupported VNC security type {t}"))),
     }
-    if (security == 2 || minor == 8)
-        && read_u32(r)? != 0 {
-            let reason = if minor == 8 { read_string(r)? } else { String::new() };
-            let reason = reason.trim();
-            return Err(proto_err(if reason.is_empty() || reason.eq_ignore_ascii_case("authentication failed") {
-                "VNC authentication failed (wrong password?)".to_string()
-            } else {
-                format!("VNC authentication failed: {reason}")
-            }));
-        }
+    if (security == 2 || minor == 8) && read_u32(r)? != 0 {
+        let reason = if minor == 8 { read_string(r)? } else { String::new() };
+        let reason = reason.trim();
+        return Err(proto_err(if reason.is_empty() || reason.eq_ignore_ascii_case("authentication failed") {
+            "VNC authentication failed (wrong password?)".to_string()
+        } else {
+            format!("VNC authentication failed: {reason}")
+        }));
+    }
 
     send(vec![1])?; // ClientInit: shared session
     let width = read_u16(r)?;
@@ -637,9 +631,7 @@ fn decode_tile(c: &mut Cursor, fb: &mut Framebuffer, x: usize, y: usize, w: usiz
                     (p, c.run_length()?)
                 } else {
                     let idx = c.u8()?;
-                    let p = *palette
-                        .get((idx & 0x7f) as usize)
-                        .ok_or_else(|| proto_err("bad ZRLE palette index"))?;
+                    let p = *palette.get((idx & 0x7f) as usize).ok_or_else(|| proto_err("bad ZRLE palette index"))?;
                     (p, if idx & 0x80 != 0 { c.run_length()? } else { 1 })
                 };
                 if i + len > total {

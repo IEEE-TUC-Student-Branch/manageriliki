@@ -52,9 +52,8 @@ fn setup_then_manage_servers() {
     let mgr = Manager::open(&dir).unwrap();
 
     let app_mgr = mgr.clone();
-    let mut harness = Harness::builder()
-        .with_size([1180.0, 740.0])
-        .build_eframe(move |cc| GuiApp::new(app_mgr, cc.egui_ctx.clone()));
+    let mut harness =
+        Harness::builder().with_size([1180.0, 740.0]).build_eframe(move |cc| GuiApp::new(app_mgr, cc.egui_ctx.clone()));
     harness.run();
     screenshot(&mut harness, "01-setup");
 
@@ -86,7 +85,8 @@ fn setup_then_manage_servers() {
         mgr.create_group(&who, group).unwrap();
     }
     for (name, group) in [("web-01", "web"), ("db-01", "data")] {
-        let input = ServerInput { name: name.into(), group: group.into(), ssh: Some(ssh.clone()), ..Default::default() };
+        let input =
+            ServerInput { name: name.into(), group: group.into(), ssh: Some(ssh.clone()), ..Default::default() };
         mgr.save_server(&who, None, input).unwrap();
     }
     harness.get_by_label("⟳ Refresh").click();
@@ -121,15 +121,13 @@ fn setup_then_manage_servers() {
     harness.run();
 
     if ssh_env.is_some() {
-        harness
-            .get_all_by_role_and_label(egui::accesskit::Role::Button, "SSH")
-            .next()
-            .unwrap()
-            .click();
+        harness.get_all_by_role_and_label(egui::accesskit::Role::Button, "SSH").next().unwrap().click();
         run_until(&mut harness, Duration::from_secs(5), |app| match &app.screen {
-            super::Screen::Main(m) => m.sessions.first().and_then(|s| s.terminal()).is_some_and(|t| {
-                t.with_screen(|sc| sc.contents().contains('$') || sc.contents().contains('❯'))
-            }),
+            super::Screen::Main(m) => m
+                .sessions
+                .first()
+                .and_then(|s| s.terminal())
+                .is_some_and(|t| t.with_screen(|sc| sc.contents().contains('$') || sc.contents().contains('❯'))),
             _ => false,
         });
         // Click into the terminal, type a command and check the remote output.
@@ -153,7 +151,9 @@ fn setup_then_manage_servers() {
             modifiers: egui::Modifiers::NONE,
         });
         let has_output = |app: &GuiApp| match &app.screen {
-            super::Screen::Main(m) => m.sessions[0].terminal().unwrap().with_screen(|sc| sc.contents().contains("gui-42")),
+            super::Screen::Main(m) => {
+                m.sessions[0].terminal().unwrap().with_screen(|sc| sc.contents().contains("gui-42"))
+            }
             _ => false,
         };
         run_until(&mut harness, Duration::from_secs(5), has_output);
@@ -183,9 +183,11 @@ fn setup_then_manage_servers() {
             .expect("an enabled VNC button")
             .click();
         let has_frame = |app: &GuiApp| match &app.screen {
-            super::Screen::Main(m) => m.sessions.iter().find_map(|s| s.vnc()).is_some_and(|d| {
-                d.session.with_framebuffer(|fb| fb.generation > 0)
-            }),
+            super::Screen::Main(m) => m
+                .sessions
+                .iter()
+                .find_map(|s| s.vnc())
+                .is_some_and(|d| d.session.with_framebuffer(|fb| fb.generation > 0)),
             _ => false,
         };
         run_until(&mut harness, Duration::from_secs(8), has_frame);
@@ -196,7 +198,9 @@ fn setup_then_manage_servers() {
             // The guest echoes keys: click into the display and type through egui.
             run_until(&mut harness, Duration::from_millis(1500), |_| false);
             let pixels = |app: &GuiApp| match &app.screen {
-                super::Screen::Main(m) => m.sessions.iter().find_map(|s| s.vnc()).unwrap().session.with_framebuffer(|fb| fb.pixels.clone()),
+                super::Screen::Main(m) => {
+                    m.sessions.iter().find_map(|s| s.vnc()).unwrap().session.with_framebuffer(|fb| fb.pixels.clone())
+                }
                 _ => Vec::new(),
             };
             let before = pixels(harness.state());
@@ -215,7 +219,8 @@ fn setup_then_manage_servers() {
             harness.step();
             run_until(&mut harness, Duration::from_millis(1500), |_| false);
             let after = pixels(harness.state());
-            let changed = after.as_chunks::<4>().0.iter().zip(before.as_chunks::<4>().0).filter(|(a, b)| a != b).count();
+            let changed =
+                after.as_chunks::<4>().0.iter().zip(before.as_chunks::<4>().0).filter(|(a, b)| a != b).count();
             assert!(changed > 300, "typed text should be echoed by the guest ({changed} px changed)");
         }
         screenshot(&mut harness, "06-vnc");

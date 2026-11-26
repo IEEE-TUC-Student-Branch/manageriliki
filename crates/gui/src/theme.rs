@@ -1,8 +1,6 @@
 //! The app's dark palette and small styled building blocks shared by every page.
 
-use eframe::egui::{
-    self, Color32, CornerRadius, FontId, Margin, RichText, Sense, Stroke, TextStyle, Ui, vec2,
-};
+use eframe::egui::{self, Color32, CornerRadius, FontId, Margin, RichText, Sense, Stroke, TextStyle, Ui, vec2};
 use manageriliki_core::{Server, Status};
 
 pub const SIDEBAR: Color32 = Color32::from_rgb(0x0c, 0x0e, 0x11);
@@ -126,7 +124,9 @@ pub fn primary(text: &str) -> egui::Button<'static> {
 }
 
 pub fn soft(text: &str) -> egui::Button<'static> {
-    egui::Button::new(RichText::new(text.to_owned()).color(ACCENT_TEXT)).fill(ACCENT_SOFT).stroke(Stroke::new(1.0, ACCENT_BORDER))
+    egui::Button::new(RichText::new(text.to_owned()).color(ACCENT_TEXT))
+        .fill(ACCENT_SOFT)
+        .stroke(Stroke::new(1.0, ACCENT_BORDER))
 }
 
 pub fn ghost(text: &str) -> egui::Button<'static> {
@@ -134,7 +134,9 @@ pub fn ghost(text: &str) -> egui::Button<'static> {
 }
 
 pub fn danger(text: &str) -> egui::Button<'static> {
-    egui::Button::new(RichText::new(text.to_owned()).color(DANGER)).fill(Color32::TRANSPARENT).stroke(Stroke::new(1.0, DANGER_BORDER))
+    egui::Button::new(RichText::new(text.to_owned()).color(DANGER))
+        .fill(Color32::TRANSPARENT)
+        .stroke(Stroke::new(1.0, DANGER_BORDER))
 }
 
 /// A small rounded tag, e.g. a group name or a link type.

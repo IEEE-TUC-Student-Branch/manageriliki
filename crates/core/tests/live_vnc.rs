@@ -14,9 +14,7 @@ fn wait_for_frame(session: &VncSession) -> std::result::Result<(usize, usize), S
         match session.state() {
             VncState::Closed(err) => return Err(err.unwrap_or_else(|| "closed".into())),
             VncState::Connected => {
-                let ready = session.with_framebuffer(|fb| {
-                    (fb.generation > 0).then_some((fb.width, fb.height))
-                });
+                let ready = session.with_framebuffer(|fb| (fb.generation > 0).then_some((fb.width, fb.height)));
                 if let Some(size) = ready {
                     return Ok(size);
                 }

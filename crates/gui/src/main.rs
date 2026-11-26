@@ -1,11 +1,13 @@
+#![forbid(unsafe_code)]
+
 mod containers_view;
 mod editors;
 mod servers;
 mod term_widget;
-mod theme;
-mod vnc_view;
 #[cfg(test)]
 mod tests;
+mod theme;
+mod vnc_view;
 
 use std::collections::HashSet;
 use std::sync::{Arc, mpsc};
@@ -15,8 +17,8 @@ use containers_view::ContainersView;
 use editors::{GroupEditor, PasswordDialog, ServerEditor, UserEditor};
 use eframe::egui::{self, Align, Align2, Color32, CornerRadius, FontId, Margin, RichText, Sense, Stroke, Ui, vec2};
 use manageriliki_core::{
-    AuditEntry, CommandOutput, Group, Identity, Manager, Result as CoreResult, Role, Server,
-    StatusMonitor, Terminal, TransportKind, User,
+    AuditEntry, CommandOutput, Group, Identity, Manager, Result as CoreResult, Role, Server, StatusMonitor, Terminal,
+    TransportKind, User,
 };
 use vnc_view::VncView;
 
@@ -36,11 +38,7 @@ fn main() -> eframe::Result {
             .with_min_inner_size([820.0, 480.0]),
         ..Default::default()
     };
-    eframe::run_native(
-        "manageriliki",
-        options,
-        Box::new(move |cc| Ok(Box::new(GuiApp::new(mgr, cc.egui_ctx.clone())))),
-    )
+    eframe::run_native("manageriliki", options, Box::new(move |cc| Ok(Box::new(GuiApp::new(mgr, cc.egui_ctx.clone())))))
 }
 
 enum Screen {
@@ -63,12 +61,9 @@ impl GuiApp {
     fn new(mgr: Manager, ctx: egui::Context) -> Self {
         theme::apply(&ctx);
         let screen = match mgr.needs_setup() {
-            Ok(true) => Screen::Setup {
-                username: "admin".into(),
-                password: String::new(),
-                confirm: String::new(),
-                error: None,
-            },
+            Ok(true) => {
+                Screen::Setup { username: "admin".into(), password: String::new(), confirm: String::new(), error: None }
+            }
             Ok(false) => login_screen(),
             Err(e) => Screen::Login { username: String::new(), password: String::new(), error: Some(e.to_string()) },
         };
@@ -203,7 +198,13 @@ fn nav_item(ui: &mut Ui, label: &str, count: Option<usize>, selected: bool) -> e
     let color = if selected { theme::TEXT } else { theme::SUBTLE };
     p.text(rect.left_center() + vec2(14.0, 0.0), Align2::LEFT_CENTER, label, FontId::proportional(14.0), color);
     if let Some(n) = count {
-        p.text(rect.right_center() - vec2(12.0, 0.0), Align2::RIGHT_CENTER, n, FontId::proportional(12.0), theme::MUTED);
+        p.text(
+            rect.right_center() - vec2(12.0, 0.0),
+            Align2::RIGHT_CENTER,
+            n,
+            FontId::proportional(12.0),
+            theme::MUTED,
+        );
     }
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }
@@ -495,7 +496,12 @@ impl MainUi {
 
         if !self.sessions.is_empty() {
             egui::Panel::top("tabs")
-                .frame(egui::Frame::new().fill(theme::SIDEBAR).inner_margin(Margin { left: 8, right: 8, top: 6, bottom: 0 }))
+                .frame(egui::Frame::new().fill(theme::SIDEBAR).inner_margin(Margin {
+                    left: 8,
+                    right: 8,
+                    top: 6,
+                    bottom: 0,
+                }))
                 .show(ui, |ui| self.tab_strip(ui));
         }
 
@@ -559,7 +565,13 @@ impl MainUi {
                 let (rect, _) = ui.allocate_exact_size(vec2(30.0, 30.0), Sense::hover());
                 ui.painter().circle_filled(rect.center(), 15.0, Color32::from_rgb(0x23, 0x30, 0x3f));
                 let initial = self.who.username.chars().next().unwrap_or('?').to_uppercase().to_string();
-                ui.painter().text(rect.center(), Align2::CENTER_CENTER, initial, FontId::proportional(13.0), theme::ACCENT_TEXT);
+                ui.painter().text(
+                    rect.center(),
+                    Align2::CENTER_CENTER,
+                    initial,
+                    FontId::proportional(13.0),
+                    theme::ACCENT_TEXT,
+                );
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 0.0;
                     ui.label(RichText::new(&self.who.username).strong().color(theme::TEXT));
@@ -585,9 +597,13 @@ impl MainUi {
                 }
                 _ => {
                     ui.label(
-                        RichText::new(format!("{} server(s) · {} open session(s)", self.servers.len(), self.sessions.len()))
-                            .small()
-                            .color(theme::MUTED),
+                        RichText::new(format!(
+                            "{} server(s) · {} open session(s)",
+                            self.servers.len(),
+                            self.sessions.len()
+                        ))
+                        .small()
+                        .color(theme::MUTED),
                     );
                 }
             }
@@ -685,7 +701,11 @@ impl MainUi {
                         } else {
                             ui.colored_label(theme::ONLINE_TEXT, "active");
                         }
-                        ui.label(u.last_login.map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string()).unwrap_or_else(|| "never".into()));
+                        ui.label(
+                            u.last_login
+                                .map(|t| t.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M").to_string())
+                                .unwrap_or_else(|| "never".into()),
+                        );
                         ui.label(u.created_at.with_timezone(&chrono::Local).format("%Y-%m-%d").to_string());
                         ui.horizontal(|ui| {
                             if ui.add(theme::ghost("Edit").small()).clicked() {
@@ -695,7 +715,8 @@ impl MainUi {
                                 self.password_dialog = Some(PasswordDialog::reset(u));
                             }
                             if ui.add_enabled(u.id != self.who.user_id, theme::danger("Delete").small()).clicked() {
-                                self.confirm = Some((format!("Delete user “{}”?", u.username), Confirm::DeleteUser(u.id)));
+                                self.confirm =
+                                    Some((format!("Delete user “{}”?", u.username), Confirm::DeleteUser(u.id)));
                             }
                         });
                         ui.end_row();
@@ -722,10 +743,16 @@ impl MainUi {
                     }
                     ui.end_row();
                     for a in &self.audit {
-                        ui.label(theme::mono(a.ts.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M:%S").to_string()));
+                        ui.label(theme::mono(
+                            a.ts.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M:%S").to_string(),
+                        ));
                         ui.label(&a.username);
                         let bad = a.action.contains("fail") || a.action.contains("mismatch");
-                        ui.label(if bad { RichText::new(&a.action).color(theme::OFFLINE_TEXT) } else { RichText::new(&a.action) });
+                        ui.label(if bad {
+                            RichText::new(&a.action).color(theme::OFFLINE_TEXT)
+                        } else {
+                            RichText::new(&a.action)
+                        });
                         ui.label(&a.target);
                         ui.label(theme::mono(&a.detail));
                         ui.end_row();
@@ -819,7 +846,10 @@ impl MainUi {
                 editors::DialogResult::Cancel => self.user_editor = None,
                 editors::DialogResult::Submit => {
                     let result = match editor.id {
-                        None => self.mgr.create_user(&self.who, editor.username.trim(), &editor.password, editor.role).map(|_| ()),
+                        None => self
+                            .mgr
+                            .create_user(&self.who, editor.username.trim(), &editor.password, editor.role)
+                            .map(|_| ()),
                         Some(id) => self.mgr.update_user(&self.who, id, editor.role, editor.disabled),
                     };
                     match result {
@@ -930,11 +960,9 @@ impl MainUi {
 
         let mut open = true;
         let mut run = false;
-        egui::Window::new("Run command over SSH")
-            .open(&mut open)
-            .default_size([640.0, 420.0])
-            .resizable(true)
-            .show(ctx, |ui| {
+        egui::Window::new("Run command over SSH").open(&mut open).default_size([640.0, 420.0]).resizable(true).show(
+            ctx,
+            |ui| {
                 ui.horizontal(|ui| {
                     ui.label("Run on:");
                     ui.radio_value(&mut dialog.scope, Scope::One, &dialog.server.name);
@@ -969,14 +997,19 @@ impl MainUi {
                         match result {
                             Ok(out) => {
                                 let ok = out.exit_status == 0;
-                                let header = RichText::new(format!("{name} — exit {}", out.exit_status))
-                                    .color(if ok { theme::ONLINE_TEXT } else { theme::OFFLINE_TEXT });
+                                let header = RichText::new(format!("{name} — exit {}", out.exit_status)).color(if ok {
+                                    theme::ONLINE_TEXT
+                                } else {
+                                    theme::OFFLINE_TEXT
+                                });
                                 egui::CollapsingHeader::new(header).id_salt(name).default_open(true).show(ui, |ui| {
                                     if !out.stdout.is_empty() {
                                         ui.label(RichText::new(out.stdout.trim_end()).monospace());
                                     }
                                     if !out.stderr.is_empty() {
-                                        ui.label(RichText::new(out.stderr.trim_end()).monospace().color(theme::OFFLINE_TEXT));
+                                        ui.label(
+                                            RichText::new(out.stderr.trim_end()).monospace().color(theme::OFFLINE_TEXT),
+                                        );
                                     }
                                 });
                             }
@@ -986,7 +1019,8 @@ impl MainUi {
                         }
                     }
                 });
-            });
+            },
+        );
 
         if run {
             let targets: Vec<Server> = self
@@ -1003,7 +1037,12 @@ impl MainUi {
             let repaint = self.ctx.clone();
             dialog.results.clear();
             dialog.pending = targets.len();
-            dialog.rx = Some(self.mgr.run_command_many(&self.who, &targets, dialog.command.trim(), Arc::new(move || repaint.request_repaint())));
+            dialog.rx = Some(self.mgr.run_command_many(
+                &self.who,
+                &targets,
+                dialog.command.trim(),
+                Arc::new(move || repaint.request_repaint()),
+            ));
         }
         if !open {
             self.command = None;
@@ -1017,24 +1056,45 @@ fn tab(ui: &mut Ui, kind: Option<&str>, label: &str, selected: bool, closable: b
     let mut closed = false;
     let fill = if selected { theme::BG } else { Color32::TRANSPARENT };
     let radius = CornerRadius { nw: 7, ne: 7, sw: 0, se: 0 };
-    let response = egui::Frame::new().fill(fill).corner_radius(radius).inner_margin(Margin { left: 10, right: 6, top: 4, bottom: 4 }).show(ui, |ui| {
-        ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            let color = if selected { theme::TEXT } else { theme::SUBTLE };
-            let mut text = egui::text::LayoutJob::default();
-            if let Some(kind) = kind {
-                text.append(kind, 0.0, egui::TextFormat { font_id: FontId::proportional(10.5), color: theme::MUTED, ..Default::default() });
-                text.append(" ", 0.0, egui::TextFormat::default());
-            }
-            text.append(label, 0.0, egui::TextFormat { font_id: FontId::proportional(13.0), color, ..Default::default() });
-            if ui.add(egui::Button::new(text).frame(false)).clicked() {
-                clicked = true;
-            }
-            if closable && ui.add(egui::Button::new(RichText::new("×").color(theme::MUTED)).frame(false)).on_hover_text("Close").clicked() {
-                closed = true;
-            }
+    let response = egui::Frame::new()
+        .fill(fill)
+        .corner_radius(radius)
+        .inner_margin(Margin { left: 10, right: 6, top: 4, bottom: 4 })
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                let color = if selected { theme::TEXT } else { theme::SUBTLE };
+                let mut text = egui::text::LayoutJob::default();
+                if let Some(kind) = kind {
+                    text.append(
+                        kind,
+                        0.0,
+                        egui::TextFormat {
+                            font_id: FontId::proportional(10.5),
+                            color: theme::MUTED,
+                            ..Default::default()
+                        },
+                    );
+                    text.append(" ", 0.0, egui::TextFormat::default());
+                }
+                text.append(
+                    label,
+                    0.0,
+                    egui::TextFormat { font_id: FontId::proportional(13.0), color, ..Default::default() },
+                );
+                if ui.add(egui::Button::new(text).frame(false)).clicked() {
+                    clicked = true;
+                }
+                if closable
+                    && ui
+                        .add(egui::Button::new(RichText::new("×").color(theme::MUTED)).frame(false))
+                        .on_hover_text("Close")
+                        .clicked()
+                {
+                    closed = true;
+                }
+            });
         });
-    });
     if selected {
         let r = response.response.rect;
         ui.painter().hline(r.x_range().shrink(4.0), r.top() + 1.0, Stroke::new(2.0, theme::ACCENT));

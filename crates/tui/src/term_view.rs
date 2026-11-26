@@ -33,11 +33,8 @@ pub fn render(frame: &mut Frame, area: Rect, term: &Terminal) {
     let scrolled = term.with_screen(|s| s.scrollback());
     let scroll_note = if scrolled > 0 { format!(" [scrollback -{scrolled}]") } else { String::new() };
     frame.render_widget(
-        Line::from(format!(
-            " {} · {state}{scroll_note} · Ctrl+] or F12 to close · Shift+PgUp/PgDn scroll",
-            term.title
-        ))
-        .style(Style::new().bg(Color::Blue).fg(Color::White).add_modifier(Modifier::BOLD)),
+        Line::from(format!(" {} · {state}{scroll_note} · Ctrl+] or F12 to close · Shift+PgUp/PgDn scroll", term.title))
+            .style(Style::new().bg(Color::Blue).fg(Color::White).add_modifier(Modifier::BOLD)),
         title_area,
     );
 
@@ -84,11 +81,7 @@ pub fn encode_key(key: &KeyEvent, application_cursor: bool) -> Option<Vec<u8>> {
     let alt = key.modifiers.contains(KeyModifiers::ALT);
     let csi = |s: &str| Some(format!("\x1b[{s}").into_bytes());
     let cursor = |c: char| {
-        if application_cursor {
-            Some(format!("\x1bO{c}").into_bytes())
-        } else {
-            Some(format!("\x1b[{c}").into_bytes())
-        }
+        if application_cursor { Some(format!("\x1bO{c}").into_bytes()) } else { Some(format!("\x1b[{c}").into_bytes()) }
     };
     let mut bytes = match key.code {
         KeyCode::Char(c) if ctrl => {

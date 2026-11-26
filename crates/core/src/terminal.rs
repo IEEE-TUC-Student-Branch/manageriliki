@@ -82,8 +82,7 @@ impl Terminal {
                     let first = if busy {
                         rx.try_recv().map_err(|e| e == TryRecvError::Disconnected)
                     } else {
-                        rx.recv_timeout(Duration::from_millis(15))
-                            .map_err(|e| e == RecvTimeoutError::Disconnected)
+                        rx.recv_timeout(Duration::from_millis(15)).map_err(|e| e == RecvTimeoutError::Disconnected)
                     };
                     let mut next = first;
                     loop {
@@ -108,12 +107,7 @@ impl Terminal {
             notify();
         });
 
-        Terminal {
-            title,
-            parser,
-            state,
-            tx: Some(tx),
-        }
+        Terminal { title, parser, state, tx: Some(tx) }
     }
 
     pub fn state(&self) -> TerminalState {
@@ -148,9 +142,7 @@ impl Terminal {
     pub fn scroll(&self, delta: isize) {
         let mut parser = lock(&self.parser);
         let current = parser.screen().scrollback() as isize;
-        parser
-            .screen_mut()
-            .set_scrollback((current + delta).max(0) as usize);
+        parser.screen_mut().set_scrollback((current + delta).max(0) as usize);
     }
 
     pub fn with_screen<R>(&self, f: impl FnOnce(&vt100::Screen) -> R) -> R {

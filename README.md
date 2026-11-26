@@ -163,3 +163,22 @@ The GUI test runs headlessly. Live tests against real servers are opt-in:
 MGR_TEST_VNC=127.0.0.1:5901 cargo test -p manageriliki-core --test live_vnc -- --nocapture
 MGR_TEST_VNC=127.0.0.1:5901 MGR_SCREENSHOT_DIR=/tmp/shots cargo test -p manageriliki-gui
 ```
+
+## CI
+
+GitHub Actions runs on every push to `main` and every pull request:
+
+- **CI** (`.github/workflows/ci.yml`): `cargo fmt --check`, clippy with
+  warnings as errors, debug and release builds against the committed
+  `Cargo.lock`, the full test suite (GUI screenshots are uploaded as an
+  artifact) and a strict docs build.
+- **Security** (`.github/workflows/security.yml`, also weekly):
+  `cargo-deny` for RustSec advisories, licenses and crate sources
+  (`deny.toml`), a gitleaks scan of the full history (`.gitleaks.toml`), and a
+  check that every crate keeps `#![forbid(unsafe_code)]`.
+
+`crates/core/tests/safety.rs` holds the security invariants: owner-only data
+files, no plaintext secrets or passwords on disk or in the API, the role
+matrix, per-server required roles, revalidation of logged-in sessions, and
+hostile input handling. Run it locally with
+`cargo test -p manageriliki-core --test safety`.

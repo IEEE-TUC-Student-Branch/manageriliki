@@ -11,14 +11,14 @@ use std::thread;
 use rusqlite::Connection;
 
 use crate::auth;
-use crate::containers::{self, Container, Exec as _, ContainerAction, ContainerList, ContainerService};
+use crate::containers::{self, Container, ContainerAction, ContainerList, ContainerService, Exec as _};
 use crate::db::{self, SecretSlot, ServerRow};
 use crate::error::{Error, Result, invalid};
 use crate::models::*;
 use crate::terminal::{Connector, Notify, Terminal};
 use crate::transport::{self, Link, SerialLink, SshLink, TcpLink};
-use crate::vnc::{VncConnector, VncSession};
 use crate::vault::Vault;
+use crate::vnc::{VncConnector, VncSession};
 
 /// A logged-in user. Permissions are re-validated on every call, so changes
 /// to the account (role, disabled) take effect immediately.
@@ -63,19 +63,10 @@ impl Manager {
     }
 
     pub fn open(data_dir: &Path) -> Result<Self> {
-        DirBuilder::new()
-            .recursive(true)
-            .mode(0o700)
-            .create(data_dir)?;
+        DirBuilder::new().recursive(true).mode(0o700).create(data_dir)?;
         let conn = db::open(&data_dir.join("manageriliki.db"))?;
         let vault = Vault::open(&data_dir.join("vault.key"))?;
-        Ok(Manager {
-            inner: Arc::new(Inner {
-                conn: Mutex::new(conn),
-                vault,
-                data_dir: data_dir.to_path_buf(),
-            }),
-        })
+        Ok(Manager { inner: Arc::new(Inner { conn: Mutex::new(conn), vault, data_dir: data_dir.to_path_buf() }) })
     }
 
     pub fn data_dir(&self) -> &Path {
@@ -105,11 +96,7 @@ impl Manager {
     /// Re-reads the caller's account, e.g. to refresh a role shown in the UI.
     pub fn refresh_identity(&self, who: &Identity) -> Result<Identity> {
         let user = self.authorize(who, Role::Viewer)?;
-        Ok(Identity {
-            user_id: user.id,
-            username: user.username,
-            role: user.role,
-        })
+        Ok(Identity { user_id: user.id, username: user.username, role: user.role })
     }
 
     // ---- accounts ----
@@ -130,11 +117,7 @@ impl Manager {
         let id = db::insert_user(&conn, username, &hash, Role::Admin)?;
         db::touch_last_login(&conn, id)?;
         db::audit(&conn, username, "setup", username, "created initial admin")?;
-        Ok(Identity {
-            user_id: id,
-            username: username.to_string(),
-            role: Role::Admin,
-        })
+        Ok(Identity { user_id: id, username: username.to_string(), role: Role::Admin })
     }
 
     pub fn login(&self, username: &str, password: &str) -> Result<Identity> {
@@ -155,11 +138,7 @@ impl Manager {
         let conn = self.db();
         db::touch_last_login(&conn, user.id)?;
         db::audit(&conn, &user.username, "login", &user.username, "")?;
-        Ok(Identity {
-            user_id: user.id,
-            username: user.username,
-            role: user.role,
-        })
+        Ok(Identity { user_id: user.id, username: user.username, role: user.role })
     }
 
     pub fn logout(&self, who: &Identity) {
@@ -171,13 +150,7 @@ impl Manager {
         db::list_users(&self.db())
     }
 
-    pub fn create_user(
-        &self,
-        who: &Identity,
-        username: &str,
-        password: &str,
-        role: Role,
-    ) -> Result<User> {
+    pub fn create_user(&self, who: &Identity, username: &str, password: &str, role: Role) -> Result<User> {
         self.authorize(who, Role::Admin)?;
         auth::validate_username(username)?;
         auth::validate_password(password)?;
@@ -197,8 +170,7 @@ impl Manager {
         if id == who.user_id && disabled {
             return Err(invalid("you cannot disable your own account"));
         }
-        let loses_admin =
-            target.role == Role::Admin && !target.disabled && (role != Role::Admin || disabled);
+        let loses_admin = target.role == Role::Admin && !target.disabled && (role != Role::Admin || disabled);
         if loses_admin && db::count_active_admins(&conn)? <= 1 {
             return Err(invalid("cannot demote or disable the last active admin"));
         }
@@ -275,10 +247,7 @@ impl Manager {
             Some(id) => db::get_server(&conn, id)?.has_secret,
             None => false,
         };
-        let uses_secret = matches!(
-            input.ssh.as_ref().map(|s| &s.auth),
-            Some(SshAuth::Password | SshAuth::Key { .. })
-        );
+        let uses_secret = matches!(input.ssh.as_ref().map(|s| &s.auth), Some(SshAuth::Password | SshAuth::Key { .. }));
         let password_auth = matches!(input.ssh.as_ref().map(|s| &s.auth), Some(SshAuth::Password));
         let will_have_secret = match &input.secret {
             SecretUpdate::Keep => had_secret,
@@ -323,9 +292,7 @@ impl Manager {
         match (update, used) {
             (_, false) | (SecretUpdate::Clear, _) => db::set_secret(conn, id, slot, None),
             (SecretUpdate::Set(s), true) if s.is_empty() => db::set_secret(conn, id, slot, None),
-            (SecretUpdate::Set(s), true) => {
-                db::set_secret(conn, id, slot, Some(&self.inner.vault.encrypt(s)?))
-            }
+            (SecretUpdate::Set(s), true) => db::set_secret(conn, id, slot, Some(&self.inner.vault.encrypt(s)?)),
             (SecretUpdate::Keep, true) => Ok(()),
         }
     }
@@ -402,9 +369,7 @@ impl Manager {
     }
 
     fn secret(&self, server_id: i64, slot: SecretSlot) -> Result<Option<String>> {
-        db::get_secret(&self.db(), server_id, slot)?
-            .map(|s| self.inner.vault.decrypt(&s))
-            .transpose()
+        db::get_secret(&self.db(), server_id, slot)?.map(|s| self.inner.vault.decrypt(&s)).transpose()
     }
 
     /// Trust-on-first-use host key verification.
@@ -420,24 +385,15 @@ impl Manager {
             Some(known) => {
                 let detail = format!("expected {known}, got {fp}");
                 db::audit(&conn, who, "hostkey.mismatch", &server.name, &detail)?;
-                Err(Error::HostKeyMismatch {
-                    server: server.name.clone(),
-                    expected: known,
-                    actual: fp.to_string(),
-                })
+                Err(Error::HostKeyMismatch { server: server.name.clone(), expected: known, actual: fp.to_string() })
             }
         }
     }
 
     fn ssh_connect(&self, who: &str, server: &Server) -> Result<transport::SshConnection> {
-        let cfg = server
-            .ssh
-            .as_ref()
-            .ok_or_else(|| invalid(format!("{} has no SSH configuration", server.name)))?;
+        let cfg = server.ssh.as_ref().ok_or_else(|| invalid(format!("{} has no SSH configuration", server.name)))?;
         let secret = self.secret(server.id, SecretSlot::Ssh)?;
-        transport::ssh_connect(cfg, secret.as_deref(), |fp| {
-            self.check_host_key(who, server, fp)
-        })
+        transport::ssh_connect(cfg, secret.as_deref(), |fp| self.check_host_key(who, server, fp))
     }
 
     /// Opens an interactive terminal. Connecting happens in the background;
@@ -486,10 +442,7 @@ impl Manager {
     /// Connecting happens in the background; watch `VncSession::state()`.
     pub fn open_vnc(&self, who: &Identity, server_id: i64, notify: Notify) -> Result<VncSession> {
         let server = self.connectable(who, server_id)?;
-        let cfg = server
-            .vnc
-            .clone()
-            .ok_or_else(|| invalid(format!("{} has no VNC configuration", server.name)))?;
+        let cfg = server.vnc.clone().ok_or_else(|| invalid(format!("{} has no VNC configuration", server.name)))?;
         let password = self.secret(server.id, SecretSlot::Vnc)?;
 
         let connect: VncConnector = if cfg.via_ssh {
@@ -525,11 +478,7 @@ impl Manager {
         self.audit(&who.username, "command.run", &server.name, command);
         let conn = self.ssh_connect(&who.username, &server)?;
         let out = transport::ssh_exec(&conn, command)?;
-        Ok(CommandOutput {
-            stdout: out.stdout,
-            stderr: out.stderr,
-            exit_status: out.exit_status,
-        })
+        Ok(CommandOutput { stdout: out.stdout, stderr: out.stderr, exit_status: out.exit_status })
     }
 
     /// Runs `command` on several servers in parallel. Each result arrives on
@@ -730,10 +679,7 @@ mod tests {
         let v = m.login("val", "viewerpass").unwrap();
         assert!(m.list_servers(&v).is_ok());
         assert!(matches!(m.list_users(&v), Err(Error::Forbidden(Role::Admin))));
-        assert!(matches!(
-            m.run_command(&v, 1, "true"),
-            Err(Error::Forbidden(Role::Operator))
-        ));
+        assert!(matches!(m.run_command(&v, 1, "true"), Err(Error::Forbidden(Role::Operator))));
 
         // Disabling takes effect for an already logged-in identity.
         m.update_user(&admin, viewer.id, Role::Viewer, true).unwrap();
@@ -758,11 +704,7 @@ mod tests {
 
         let mut input = ServerInput {
             name: "web1".into(),
-            ssh: Some(SshConfig {
-                host: "10.0.0.5".into(),
-                auth: SshAuth::Password,
-                ..Default::default()
-            }),
+            ssh: Some(SshConfig { host: "10.0.0.5".into(), auth: SshAuth::Password, ..Default::default() }),
             ..Default::default()
         };
         assert!(m.save_server(&admin, None, input.clone()).is_err(), "password required");
@@ -784,10 +726,7 @@ mod tests {
         // Trust on first use, then reject a different key.
         m.check_host_key("admin", &s, "SHA256:aaa").unwrap();
         m.check_host_key("admin", &s, "SHA256:aaa").unwrap();
-        assert!(matches!(
-            m.check_host_key("admin", &s, "SHA256:bbb"),
-            Err(Error::HostKeyMismatch { .. })
-        ));
+        assert!(matches!(m.check_host_key("admin", &s, "SHA256:bbb"), Err(Error::HostKeyMismatch { .. })));
         m.reset_host_key(&admin, id).unwrap();
         m.check_host_key("admin", &s, "SHA256:bbb").unwrap();
 

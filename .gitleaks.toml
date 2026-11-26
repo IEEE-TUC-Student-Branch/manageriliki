@@ -1,0 +1,12 @@
+# gitleaks config for the Security workflow: the default rules, minus test
+# fixtures, which contain made-up passwords on purpose.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Test fixtures"
+paths = [
+    '''crates/[^/]+/tests/.*\.rs''',
+    '''crates/[^/]+/src/tests\.rs''',
+]

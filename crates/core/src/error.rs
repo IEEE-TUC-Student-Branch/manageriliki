@@ -26,11 +26,7 @@ pub enum Error {
         "host key mismatch for {server}: expected {expected}, got {actual}. \
          If the server was reinstalled, an admin can reset its stored host key."
     )]
-    HostKeyMismatch {
-        server: String,
-        expected: String,
-        actual: String,
-    },
+    HostKeyMismatch { server: String, expected: String, actual: String },
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

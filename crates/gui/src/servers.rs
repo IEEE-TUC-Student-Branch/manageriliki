@@ -1,7 +1,10 @@
 //! The Servers page: grouped cards, or a compact grouped table with an
 //! inspector for the selected server.
 
-use eframe::egui::{self, Align, Align2, Color32, CornerRadius, FontId, Margin, Rect, RichText, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
+use eframe::egui::{
+    self, Align, Align2, Color32, CornerRadius, FontId, Margin, Rect, RichText, Sense, Stroke, StrokeKind, Ui, pos2,
+    vec2,
+};
 use manageriliki_core::{Role, Server, SshAuth, Status, TransportKind};
 
 use crate::editors::ServerEditor;
@@ -133,11 +136,8 @@ impl MainUi {
                 Status::Unknown => {}
             }
         }
-        let summary = if self.servers.is_empty() {
-            String::new()
-        } else {
-            format!("{online} online · {offline} offline")
-        };
+        let summary =
+            if self.servers.is_empty() { String::new() } else { format!("{online} online · {offline} offline") };
         ui.horizontal(|ui| {
             theme::page_title(ui, "Servers", &summary);
             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
@@ -179,7 +179,11 @@ impl MainUi {
                 ui.horizontal(|ui| {
                     ui.label(theme::caption(group_title(&group)));
                     let n = servers.len();
-                    ui.label(RichText::new(format!("{n} server{}", if n == 1 { "" } else { "s" })).small().color(theme::MUTED));
+                    ui.label(
+                        RichText::new(format!("{n} server{}", if n == 1 { "" } else { "s" }))
+                            .small()
+                            .color(theme::MUTED),
+                    );
                     ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                         let target = servers.iter().find(|s| s.ssh.is_some() && self.can_connect(s));
                         if let (false, Some(target)) = (group.is_empty(), target)
@@ -215,45 +219,48 @@ impl MainUi {
             _ => None,
         };
         // The card sits in a horizontal row; lay its contents out top to bottom.
-        theme::card().show(ui, |ui| ui.vertical(|ui| {
-            ui.set_width(width - 34.0);
-            ui.horizontal_top(|ui| {
-                let d = theme::dot(ui, dot);
-                if let Some(e) = &offline_reason {
-                    d.on_hover_text(e);
-                }
-                ui.vertical(|ui| {
-                    ui.spacing_mut().item_spacing.y = 2.0;
-                    ui.label(RichText::new(&s.name).strong().size(15.0).color(theme::TEXT)).on_hover_text(details(s));
-                    ui.label(theme::mono(theme::address(s)));
-                });
-                ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
-                    if self.is_admin() {
-                        ui.menu_button(RichText::new("•••").color(theme::MUTED), |ui| self.admin_menu(ui, s))
-                            .response
-                            .on_hover_text("More actions");
-                    }
-                    let status = ui.label(RichText::new(label).small().color(color));
+        theme::card().show(ui, |ui| {
+            ui.vertical(|ui| {
+                ui.set_width(width - 34.0);
+                ui.horizontal_top(|ui| {
+                    let d = theme::dot(ui, dot);
                     if let Some(e) = &offline_reason {
-                        status.on_hover_text(e);
+                        d.on_hover_text(e);
+                    }
+                    ui.vertical(|ui| {
+                        ui.spacing_mut().item_spacing.y = 2.0;
+                        ui.label(RichText::new(&s.name).strong().size(15.0).color(theme::TEXT))
+                            .on_hover_text(details(s));
+                        ui.label(theme::mono(theme::address(s)));
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                        if self.is_admin() {
+                            ui.menu_button(RichText::new("•••").color(theme::MUTED), |ui| self.admin_menu(ui, s))
+                                .response
+                                .on_hover_text("More actions");
+                        }
+                        let status = ui.label(RichText::new(label).small().color(color));
+                        if let Some(e) = &offline_reason {
+                            status.on_hover_text(e);
+                        }
+                    });
+                });
+                if !s.notes.is_empty() {
+                    ui.label(RichText::new(&s.notes).small().color(theme::MUTED));
+                }
+                ui.add_space(4.0);
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    let connect = self.can_connect(s);
+                    for (i, a) in actions(s).into_iter().enumerate() {
+                        let b = if i == 0 { theme::soft(short_label(a)) } else { theme::ghost(short_label(a)) };
+                        if ui.add_enabled(connect, b).on_disabled_hover_text(self.connect_hint()).clicked() {
+                            self.run_action(s, a);
+                        }
                     }
                 });
-            });
-            if !s.notes.is_empty() {
-                ui.label(RichText::new(&s.notes).small().color(theme::MUTED));
-            }
-            ui.add_space(4.0);
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
-                let connect = self.can_connect(s);
-                for (i, a) in actions(s).into_iter().enumerate() {
-                    let b = if i == 0 { theme::soft(short_label(a)) } else { theme::ghost(short_label(a)) };
-                    if ui.add_enabled(connect, b).on_disabled_hover_text(self.connect_hint()).clicked() {
-                        self.run_action(s, a);
-                    }
-                }
-            });
-        }));
+            })
+        });
     }
 
     fn admin_menu(&mut self, ui: &mut Ui, s: &Server) {
@@ -262,7 +269,10 @@ impl MainUi {
         }
         if ui.add_enabled(s.host_key_fp.is_some(), egui::Button::new("Forget host key")).clicked() {
             self.confirm = Some((
-                format!("Forget the trusted SSH host key of “{}”? The next connection will trust whatever key the server presents.", s.name),
+                format!(
+                    "Forget the trusted SSH host key of “{}”? The next connection will trust whatever key the server presents.",
+                    s.name
+                ),
                 Confirm::ResetHostKey(s.id),
             ));
         }
@@ -277,11 +287,8 @@ impl MainUi {
     fn compact(&mut self, ui: &mut Ui, visible: &[Server]) {
         // Rows in display order (groups expanded), for keyboard navigation.
         let groups = by_group(visible);
-        let rows: Vec<&Server> = groups
-            .iter()
-            .filter(|(g, _)| !self.collapsed.contains(g))
-            .flat_map(|(_, list)| list.iter())
-            .collect();
+        let rows: Vec<&Server> =
+            groups.iter().filter(|(g, _)| !self.collapsed.contains(g)).flat_map(|(_, list)| list.iter()).collect();
         if !visible.iter().any(|s| Some(s.id) == self.selected) {
             self.selected = rows.first().or(visible.first().as_ref()).map(|s| s.id);
         }
@@ -289,7 +296,11 @@ impl MainUi {
         if !typing && self.confirm.is_none() && self.server_editor.is_none() {
             let pos = rows.iter().position(|s| Some(s.id) == self.selected);
             let (down, up, enter) = ui.input(|i| {
-                (i.key_pressed(egui::Key::ArrowDown), i.key_pressed(egui::Key::ArrowUp), i.key_pressed(egui::Key::Enter))
+                (
+                    i.key_pressed(egui::Key::ArrowDown),
+                    i.key_pressed(egui::Key::ArrowUp),
+                    i.key_pressed(egui::Key::Enter),
+                )
             });
             if let Some(p) = pos {
                 if down && p + 1 < rows.len() {
@@ -378,7 +389,13 @@ impl MainUi {
         let [name_x, addr_x, links_x, status_x] = Self::columns(rect.width());
         let p = ui.painter_at(rect);
         if selected {
-            p.rect(rect.shrink(1.0), CornerRadius::same(6), theme::SELECTED, Stroke::new(1.0, theme::ACCENT_BORDER), StrokeKind::Inside);
+            p.rect(
+                rect.shrink(1.0),
+                CornerRadius::same(6),
+                theme::SELECTED,
+                Stroke::new(1.0, theme::ACCENT_BORDER),
+                StrokeKind::Inside,
+            );
         } else if response.hovered() {
             p.rect_filled(rect, CornerRadius::same(6), theme::faint_hover());
         }
@@ -391,7 +408,8 @@ impl MainUi {
                 p.circle_stroke(pos2(rect.left() + 14.0, y), 3.5, Stroke::new(1.0, theme::MUTED));
             }
         }
-        let clip = |from: f32, to: f32| Rect::from_x_y_ranges(rect.left() + from..=rect.left() + to - 8.0, rect.y_range());
+        let clip =
+            |from: f32, to: f32| Rect::from_x_y_ranges(rect.left() + from..=rect.left() + to - 8.0, rect.y_range());
         p.with_clip_rect(clip(name_x, addr_x)).text(
             pos2(rect.left() + name_x, y),
             Align2::LEFT_CENTER,
@@ -411,7 +429,13 @@ impl MainUi {
         for (_, text) in links.into_iter().filter(|(on, _)| *on) {
             let galley = p.layout_no_wrap(text.to_string(), FontId::proportional(11.0), theme::SUBTLE);
             let chip = Rect::from_min_size(pos2(x, y - 9.0), vec2(galley.size().x + 12.0, 18.0));
-            p.rect(chip, CornerRadius::same(4), theme::SURFACE_2, Stroke::new(1.0, theme::BORDER_STRONG), StrokeKind::Inside);
+            p.rect(
+                chip,
+                CornerRadius::same(4),
+                theme::SURFACE_2,
+                Stroke::new(1.0, theme::BORDER_STRONG),
+                StrokeKind::Inside,
+            );
             p.galley(pos2(x + 6.0, y - galley.size().y / 2.0), galley, theme::SUBTLE);
             x = chip.right() + 4.0;
         }
@@ -499,7 +523,11 @@ impl MainUi {
                 row(ui, "Host key", theme::mono(fp));
             }
             if let Some(serial) = &s.serial {
-                row(ui, "Serial", theme::mono(format!("{} · flow {:?}", serial.summary(), serial.flow_control)).color(theme::TEXT));
+                row(
+                    ui,
+                    "Serial",
+                    theme::mono(format!("{} · flow {:?}", serial.summary(), serial.flow_control)).color(theme::TEXT),
+                );
             }
             if let Some(vnc) = &s.vnc {
                 let pw = if s.has_vnc_secret { " · password stored" } else { "" };
@@ -545,7 +573,8 @@ fn group_header(ui: &mut Ui, title: &str, count: usize, collapsed: bool) -> egui
         vec![c + vec2(-4.0, -2.5), c + vec2(4.0, -2.5), c + vec2(0.0, 3.0)]
     };
     p.add(egui::Shape::convex_polygon(points, theme::SUBTLE, Stroke::NONE));
-    let title_rect = p.text(pos2(rect.left() + 28.0, c.y), Align2::LEFT_CENTER, title, FontId::proportional(13.5), theme::SUBTLE);
+    let title_rect =
+        p.text(pos2(rect.left() + 28.0, c.y), Align2::LEFT_CENTER, title, FontId::proportional(13.5), theme::SUBTLE);
     p.text(pos2(title_rect.right() + 8.0, c.y), Align2::LEFT_CENTER, count, FontId::proportional(12.0), theme::MUTED);
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
 }

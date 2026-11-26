@@ -1,6 +1,8 @@
 //! Core library for manageriliki: storage, accounts, credentials and the
 //! SSH / serial transports, container runtimes shared by the TUI and GUI frontends.
 
+#![forbid(unsafe_code)]
+
 mod auth;
 mod containers;
 mod db;
@@ -13,9 +15,7 @@ mod transport;
 mod vault;
 mod vnc;
 
-pub use containers::{
-    Container, ContainerAction, ContainerList, ContainerService, Runtime, ServiceKind,
-};
+pub use containers::{Container, ContainerAction, ContainerList, ContainerService, Runtime, ServiceKind};
 pub use error::{Error, Result};
 pub use manager::{CommandOutput, Identity, Manager};
 pub use models::*;

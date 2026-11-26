@@ -3,9 +3,9 @@ use std::time::Duration;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use manageriliki_core::{
-    AuditEntry, CommandOutput, FlowControl, Group, Identity, Manager, Parity, Result as CoreResult,
-    Role, SecretUpdate, SerialConfig, Server, ServerInput, SshAuth, SshConfig, Status,
-    StatusMonitor, Terminal, TransportKind, User, VncConfig,
+    AuditEntry, CommandOutput, FlowControl, Group, Identity, Manager, Parity, Result as CoreResult, Role, SecretUpdate,
+    SerialConfig, Server, ServerInput, SshAuth, SshConfig, Status, StatusMonitor, Terminal, TransportKind, User,
+    VncConfig,
 };
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -213,9 +213,7 @@ impl MainView {
                 term.scroll(10);
             } else if key.modifiers.contains(KeyModifiers::SHIFT) && key.code == KeyCode::PageDown {
                 term.scroll(-10);
-            } else if let Some(bytes) =
-                term_view::encode_key(&key, term.with_screen(|s| s.application_cursor()))
-            {
+            } else if let Some(bytes) = term_view::encode_key(&key, term.with_screen(|s| s.application_cursor())) {
                 term.scroll(isize::MIN / 2); // typing jumps back to the live screen
                 term.write(bytes);
             }
@@ -232,7 +230,14 @@ impl MainView {
                 containers_view::Outcome::Shell(c) => {
                     let server_id = screen.server.id;
                     let (cols, rows) = crossterm::terminal::size().unwrap_or((80, 24));
-                    match self.mgr.open_container_shell(&self.who, server_id, &c, rows.saturating_sub(1), cols, Arc::new(|| {})) {
+                    match self.mgr.open_container_shell(
+                        &self.who,
+                        server_id,
+                        &c,
+                        rows.saturating_sub(1),
+                        cols,
+                        Arc::new(|| {}),
+                    ) {
                         Ok(term) => self.terminal = Some(term),
                         Err(e) => screen.show_error(e),
                     }
@@ -412,10 +417,8 @@ impl MainView {
     fn on_settings_key(&mut self, key: KeyEvent) {
         match (key.code, self.selected_group().cloned()) {
             (KeyCode::Char('a'), _) => {
-                self.modal = Some(Modal::Group {
-                    id: None,
-                    form: Form::new("New server group").text("name", "Name", ""),
-                })
+                self.modal =
+                    Some(Modal::Group { id: None, form: Form::new("New server group").text("name", "Name", "") })
             }
             (KeyCode::Char('e'), Some(g)) => {
                 self.modal = Some(Modal::Group {
@@ -480,51 +483,55 @@ impl MainView {
                 KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => None,
                 _ => Some(Modal::Confirm { message, action }),
             },
-            Modal::Server { id, mut form } => self.form_step(&mut form, key, |v, form| {
-                let input = read_server_form(form)?;
-                v.mgr.save_server(&v.who, id, input).map_err(|e| e.to_string())?;
-                v.info("server saved");
-                Ok(())
-            })
-            .then_some(Modal::Server { id, form }),
-            Modal::User { id, mut form } => self.form_step(&mut form, key, |v, form| {
-                let role = Role::parse(&form.get("role")).unwrap_or(Role::Viewer);
-                match id {
-                    None => v
-                        .mgr
-                        .create_user(&v.who, form.get("username").trim(), &form.get("password"), role)
-                        .map(|_| ()),
-                    Some(id) => v.mgr.update_user(&v.who, id, role, form.on("disabled")),
-                }
-                .map_err(|e| e.to_string())?;
-                v.info("user saved");
-                Ok(())
-            })
-            .then_some(Modal::User { id, form }),
-            Modal::Group { id, mut form } => self.form_step(&mut form, key, |v, form| {
-                let name = form.get("name");
-                match id {
-                    None => v.mgr.create_group(&v.who, &name).map(|_| ()),
-                    Some(id) => v.mgr.rename_group(&v.who, id, &name),
-                }
-                .map_err(|e| e.to_string())?;
-                v.info("group saved");
-                Ok(())
-            })
-            .then_some(Modal::Group { id, form }),
-            Modal::Password { user_id, mut form } => self.form_step(&mut form, key, |v, form| {
-                if form.get("new") != form.get("confirm") {
-                    return Err("passwords do not match".into());
-                }
-                match user_id {
-                    None => v.mgr.change_own_password(&v.who, &form.get("old"), &form.get("new")),
-                    Some(id) => v.mgr.reset_password(&v.who, id, &form.get("new")),
-                }
-                .map_err(|e| e.to_string())?;
-                v.info("password changed");
-                Ok(())
-            })
-            .then_some(Modal::Password { user_id, form }),
+            Modal::Server { id, mut form } => self
+                .form_step(&mut form, key, |v, form| {
+                    let input = read_server_form(form)?;
+                    v.mgr.save_server(&v.who, id, input).map_err(|e| e.to_string())?;
+                    v.info("server saved");
+                    Ok(())
+                })
+                .then_some(Modal::Server { id, form }),
+            Modal::User { id, mut form } => self
+                .form_step(&mut form, key, |v, form| {
+                    let role = Role::parse(&form.get("role")).unwrap_or(Role::Viewer);
+                    match id {
+                        None => v
+                            .mgr
+                            .create_user(&v.who, form.get("username").trim(), &form.get("password"), role)
+                            .map(|_| ()),
+                        Some(id) => v.mgr.update_user(&v.who, id, role, form.on("disabled")),
+                    }
+                    .map_err(|e| e.to_string())?;
+                    v.info("user saved");
+                    Ok(())
+                })
+                .then_some(Modal::User { id, form }),
+            Modal::Group { id, mut form } => self
+                .form_step(&mut form, key, |v, form| {
+                    let name = form.get("name");
+                    match id {
+                        None => v.mgr.create_group(&v.who, &name).map(|_| ()),
+                        Some(id) => v.mgr.rename_group(&v.who, id, &name),
+                    }
+                    .map_err(|e| e.to_string())?;
+                    v.info("group saved");
+                    Ok(())
+                })
+                .then_some(Modal::Group { id, form }),
+            Modal::Password { user_id, mut form } => self
+                .form_step(&mut form, key, |v, form| {
+                    if form.get("new") != form.get("confirm") {
+                        return Err("passwords do not match".into());
+                    }
+                    match user_id {
+                        None => v.mgr.change_own_password(&v.who, &form.get("old"), &form.get("new")),
+                        Some(id) => v.mgr.reset_password(&v.who, id, &form.get("new")),
+                    }
+                    .map_err(|e| e.to_string())?;
+                    v.info("password changed");
+                    Ok(())
+                })
+                .then_some(Modal::Password { user_id, form }),
             Modal::Command { server, mut form } => {
                 match form.handle_key(key) {
                     FormResult::Pending => return Some(Modal::Command { server, form }),
@@ -598,19 +605,14 @@ impl MainView {
             screen.draw(frame, frame.area());
             return;
         }
-        let [header, body, footer] = Layout::vertical([
-            Constraint::Length(1),
-            Constraint::Fill(1),
-            Constraint::Length(1),
-        ])
-        .areas(frame.area());
+        let [header, body, footer] =
+            Layout::vertical([Constraint::Length(1), Constraint::Fill(1), Constraint::Length(1)]).areas(frame.area());
 
         let mut titles = vec!["1 Servers"];
         if self.is_admin() {
             titles.extend(["2 Users", "3 Audit", "4 Settings"]);
         }
-        let [tabs_area, who_area] =
-            Layout::horizontal([Constraint::Fill(1), Constraint::Length(40)]).areas(header);
+        let [tabs_area, who_area] = Layout::horizontal([Constraint::Fill(1), Constraint::Length(40)]).areas(header);
         frame.render_widget(
             Tabs::new(titles)
                 .select(self.tab as usize)
@@ -619,9 +621,7 @@ impl MainView {
             tabs_area,
         );
         frame.render_widget(
-            Line::from(format!("{} ({}) ", self.who.username, self.who.role))
-                .right_aligned()
-                .fg(Color::Cyan),
+            Line::from(format!("{} ({}) ", self.who.username, self.who.role)).right_aligned().fg(Color::Cyan),
             who_area,
         );
 
@@ -661,8 +661,7 @@ impl MainView {
     }
 
     fn draw_servers(&mut self, frame: &mut Frame, area: Rect) {
-        let [table_area, detail_area] =
-            Layout::vertical([Constraint::Fill(1), Constraint::Length(7)]).areas(area);
+        let [table_area, detail_area] = Layout::vertical([Constraint::Fill(1), Constraint::Length(7)]).areas(area);
         let rows = self.servers.iter().map(|s| {
             let (dot, color) = match self.monitor.get(s.id) {
                 Status::Online(_) => ("●", Color::Green),
@@ -700,12 +699,11 @@ impl MainView {
         frame.render_stateful_widget(table, table_area, &mut self.server_state);
 
         let detail = match self.selected_server() {
-            None => vec![Line::from("No servers yet.").dim(), Line::from(if self.is_admin() {
-                "Press 'a' to add one."
-            } else {
-                "Ask an admin to add servers."
-            })
-            .dim()],
+            None => vec![
+                Line::from("No servers yet.").dim(),
+                Line::from(if self.is_admin() { "Press 'a' to add one." } else { "Ask an admin to add servers." })
+                    .dim(),
+            ],
             Some(s) => {
                 let status = match self.monitor.get(s.id) {
                     Status::Online(ms) if s.ssh.is_some() => format!("online ({ms} ms)"),
@@ -789,11 +787,11 @@ impl MainView {
     }
 
     fn draw_settings(&mut self, frame: &mut Frame, area: Rect) {
-        let [table_area, help_area] =
-            Layout::vertical([Constraint::Fill(1), Constraint::Length(3)]).areas(area);
-        let rows = self.groups.iter().map(|g| {
-            Row::new(vec![Cell::from(g.name.clone()).bold(), Cell::from(g.server_count.to_string())])
-        });
+        let [table_area, help_area] = Layout::vertical([Constraint::Fill(1), Constraint::Length(3)]).areas(area);
+        let rows = self
+            .groups
+            .iter()
+            .map(|g| Row::new(vec![Cell::from(g.name.clone()).bold(), Cell::from(g.server_count.to_string())]));
         let table = Table::new(rows, [Constraint::Fill(1), Constraint::Length(9)])
             .header(Row::new(["Group", "Servers"]).bold().underlined())
             .row_highlight_style(Style::new().bg(Color::DarkGray))
@@ -809,11 +807,8 @@ impl MainView {
 
     fn draw_audit(&mut self, frame: &mut Frame, area: Rect) {
         let rows = self.audit.iter().map(|a| {
-            let color = if a.action.contains("fail") || a.action.contains("mismatch") {
-                Color::Red
-            } else {
-                Color::Reset
-            };
+            let color =
+                if a.action.contains("fail") || a.action.contains("mismatch") { Color::Red } else { Color::Reset };
             Row::new(vec![
                 Cell::from(a.ts.with_timezone(&chrono::Local).format("%Y-%m-%d %H:%M:%S").to_string()),
                 Cell::from(a.username.clone()),
@@ -860,9 +855,13 @@ fn draw_modal(frame: &mut Frame, modal: &Modal) {
             let popup = centered(area, 60.min(area.width), 6);
             frame.render_widget(Clear, popup);
             frame.render_widget(
-                Paragraph::new(vec![Line::from(message.clone()), Line::default(), Line::from("y = yes · n = no").dim()])
-                    .wrap(Wrap { trim: true })
-                    .block(Block::bordered().title(" Confirm ").border_style(Style::new().fg(Color::Yellow))),
+                Paragraph::new(vec![
+                    Line::from(message.clone()),
+                    Line::default(),
+                    Line::from("y = yes · n = no").dim(),
+                ])
+                .wrap(Wrap { trim: true })
+                .block(Block::bordered().title(" Confirm ").border_style(Style::new().fg(Color::Yellow))),
                 popup,
             );
         }
@@ -870,14 +869,12 @@ fn draw_modal(frame: &mut Frame, modal: &Modal) {
             let popup = centered(area, area.width.saturating_sub(6), area.height.saturating_sub(4));
             frame.render_widget(Clear, popup);
             frame.render_widget(
-                Paragraph::new(text.clone())
-                    .scroll((*scroll, 0))
-                    .block(
-                        Block::bordered()
-                            .title(format!(" {title} "))
-                            .title_bottom(Line::from(" ↑↓/PgUp/PgDn scroll · any other key closes ").dim())
-                            .border_style(Style::new().fg(Color::Cyan)),
-                    ),
+                Paragraph::new(text.clone()).scroll((*scroll, 0)).block(
+                    Block::bordered()
+                        .title(format!(" {title} "))
+                        .title_bottom(Line::from(" ↑↓/PgUp/PgDn scroll · any other key closes ").dim())
+                        .border_style(Style::new().fg(Color::Cyan)),
+                ),
                 popup,
             );
         }
@@ -912,10 +909,7 @@ fn draw_modal(frame: &mut Frame, modal: &Modal) {
             ];
             let popup = centered(area, 72.min(area.width), text.len() as u16 + 2);
             frame.render_widget(Clear, popup);
-            frame.render_widget(
-                Paragraph::new(text).block(Block::bordered().title(" Help — any key closes ")),
-                popup,
-            );
+            frame.render_widget(Paragraph::new(text).block(Block::bordered().title(" Help — any key closes ")), popup);
         }
     }
 }

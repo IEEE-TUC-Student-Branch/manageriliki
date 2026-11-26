@@ -24,11 +24,7 @@ impl Vault {
     pub fn open(path: &Path) -> Result<Self> {
         if !path.exists() {
             let key = Key::<XChaCha20Poly1305>::generate();
-            let mut file = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .open(path)?;
+            let mut file = OpenOptions::new().write(true).create_new(true).mode(0o600).open(path)?;
             file.write_all(key.as_slice())?;
         }
         let bytes = fs::read(path)?;
@@ -39,10 +35,8 @@ impl Vault {
 
     pub fn encrypt(&self, plaintext: &str) -> Result<Vec<u8>> {
         let nonce = XNonce::generate();
-        let ciphertext = self
-            .cipher
-            .encrypt(&nonce, plaintext.as_bytes())
-            .map_err(|_| Error::Vault("encryption failed".into()))?;
+        let ciphertext =
+            self.cipher.encrypt(&nonce, plaintext.as_bytes()).map_err(|_| Error::Vault("encryption failed".into()))?;
         let mut out = nonce.to_vec();
         out.extend_from_slice(&ciphertext);
         Ok(out)
@@ -54,9 +48,10 @@ impl Vault {
         }
         let (nonce, ciphertext) = data.split_at(NONCE_LEN);
         let nonce = XNonce::try_from(nonce).map_err(|_| Error::Vault("bad nonce".into()))?;
-        let plaintext = self.cipher.decrypt(&nonce, ciphertext).map_err(|_| {
-            Error::Vault("cannot decrypt stored secret (wrong or replaced key file?)".into())
-        })?;
+        let plaintext = self
+            .cipher
+            .decrypt(&nonce, ciphertext)
+            .map_err(|_| Error::Vault("cannot decrypt stored secret (wrong or replaced key file?)".into()))?;
         String::from_utf8(plaintext).map_err(|_| Error::Vault("stored secret is not UTF-8".into()))
     }
 }
@@ -78,6 +73,28 @@ mod tests {
         let mut tampered = sealed.clone();
         *tampered.last_mut().unwrap() ^= 1;
         assert!(Vault::open(&path).unwrap().decrypt(&tampered).is_err());
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn wrong_key_truncation_and_nonce_reuse() {
+        let dir = std::env::temp_dir().join(format!("mgr-vault2-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let a = Vault::open(&dir.join("a.key")).unwrap();
+        let b = Vault::open(&dir.join("b.key")).unwrap();
+
+        let sealed = a.encrypt("s3cret").unwrap();
+        assert!(b.decrypt(&sealed).is_err(), "a different key must not decrypt");
+        assert!(a.decrypt(&sealed[..NONCE_LEN - 1]).is_err(), "truncated nonce");
+        assert!(a.decrypt(&sealed[..NONCE_LEN]).is_err(), "missing ciphertext");
+        assert!(a.decrypt(&[]).is_err());
+
+        // Fresh random nonce every time: equal plaintexts never give equal ciphertexts.
+        let again = a.encrypt("s3cret").unwrap();
+        assert_ne!(sealed[..NONCE_LEN], again[..NONCE_LEN]);
+        assert_ne!(sealed, again);
+        assert!(!sealed.windows(6).any(|w| w == b"s3cret"));
         fs::remove_dir_all(&dir).unwrap();
     }
 }

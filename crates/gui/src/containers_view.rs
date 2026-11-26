@@ -6,8 +6,8 @@ use std::thread;
 
 use eframe::egui::{self, Color32, RichText, Ui};
 use manageriliki_core::{
-    Container, ContainerAction, ContainerList, ContainerService, Identity, Manager,
-    Result as CoreResult, Runtime, Server,
+    Container, ContainerAction, ContainerList, ContainerService, Identity, Manager, Result as CoreResult, Runtime,
+    Server,
 };
 
 const GREEN: Color32 = Color32::from_rgb(0x3c, 0xc8, 0x6e);
@@ -117,9 +117,7 @@ impl ContainersView {
         let Some(c) = self.selected.clone() else { return };
         let (mgr, who, id) = (self.mgr.clone(), self.who.clone(), self.server.id);
         let label = format!("{} {}", c.action_label(action).to_lowercase(), c.display_name());
-        self.action = Task::Loading(spawn(ctx, move || {
-            (label, mgr.container_action(&who, id, &c, action))
-        }));
+        self.action = Task::Loading(spawn(ctx, move || (label, mgr.container_action(&who, id, &c, action))));
     }
 
     fn load_logs(&mut self, ctx: &egui::Context) {
@@ -222,25 +220,37 @@ impl ContainersView {
                 ui.label(RichText::new("No containers.").weak());
                 return;
             }
-            egui::Grid::new(("containers-grid", self.id)).striped(true).num_columns(7).spacing([14.0, 6.0]).show(ui, |ui| {
-                for h in ["", "Name", "Runtime", "Image", "State", "Status", "Ports / addresses"] {
-                    ui.label(RichText::new(h).strong());
-                }
-                ui.end_row();
-                for c in &visible {
-                    dot(ui, if c.running { GREEN } else if c.state == "exited" || c.state == "stopped" { GRAY } else { RED });
-                    let selected = self.selected.as_ref().is_some_and(|s| same(s, c));
-                    if ui.selectable_label(selected, RichText::new(c.display_name()).strong()).clicked() {
-                        clicked = Some(c.clone());
+            egui::Grid::new(("containers-grid", self.id)).striped(true).num_columns(7).spacing([14.0, 6.0]).show(
+                ui,
+                |ui| {
+                    for h in ["", "Name", "Runtime", "Image", "State", "Status", "Ports / addresses"] {
+                        ui.label(RichText::new(h).strong());
                     }
-                    ui.label(c.runtime.label()).on_hover_text(format!("via {}", c.backend()));
-                    ui.label(&c.image);
-                    ui.label(&c.state);
-                    ui.label(&c.status);
-                    ui.label(RichText::new(&c.ports).monospace());
                     ui.end_row();
-                }
-            });
+                    for c in &visible {
+                        dot(
+                            ui,
+                            if c.running {
+                                GREEN
+                            } else if c.state == "exited" || c.state == "stopped" {
+                                GRAY
+                            } else {
+                                RED
+                            },
+                        );
+                        let selected = self.selected.as_ref().is_some_and(|s| same(s, c));
+                        if ui.selectable_label(selected, RichText::new(c.display_name()).strong()).clicked() {
+                            clicked = Some(c.clone());
+                        }
+                        ui.label(c.runtime.label()).on_hover_text(format!("via {}", c.backend()));
+                        ui.label(&c.image);
+                        ui.label(&c.state);
+                        ui.label(&c.status);
+                        ui.label(RichText::new(&c.ports).monospace());
+                        ui.end_row();
+                    }
+                },
+            );
         });
         if let Some(c) = clicked {
             self.select(c, &ctx);
@@ -266,11 +276,12 @@ impl ContainersView {
                 if !c.supports(action) {
                     continue;
                 }
-                let enabled = !busy && match action {
-                    ContainerAction::Start => !c.running,
-                    ContainerAction::Stop => c.running,
-                    ContainerAction::Restart => true,
-                };
+                let enabled = !busy
+                    && match action {
+                        ContainerAction::Start => !c.running,
+                        ContainerAction::Stop => c.running,
+                        ContainerAction::Restart => true,
+                    };
                 if ui.add_enabled(enabled, egui::Button::new(c.action_label(action))).clicked() {
                     if action == ContainerAction::Start {
                         self.run_action(action, &ctx);
@@ -285,7 +296,11 @@ impl ContainersView {
             if ui.add_enabled(c.running, egui::Button::new("Shell")).clicked() {
                 shell = Some(c.clone());
             }
-            if ui.add_enabled(!self.services.loading(), egui::Button::new("⟳")).on_hover_text("Reload services").clicked() {
+            if ui
+                .add_enabled(!self.services.loading(), egui::Button::new("⟳"))
+                .on_hover_text("Reload services")
+                .clicked()
+            {
                 self.load_services(&ctx);
             }
             if busy {
@@ -310,7 +325,9 @@ impl ContainersView {
         }
 
         let show_logs = !matches!(self.logs, Task::Idle);
-        egui::ScrollArea::vertical().id_salt("services").auto_shrink([false, false])
+        egui::ScrollArea::vertical()
+            .id_salt("services")
+            .auto_shrink([false, false])
             .max_height(if show_logs { ui.available_height() * 0.5 } else { f32::INFINITY })
             .show(ui, |ui| match &self.services {
                 Task::Loading(_) => {
@@ -326,20 +343,23 @@ impl ContainersView {
                     ui.label(RichText::new(if c.running { "No services found." } else { "Not running." }).weak());
                 }
                 Task::Done(Ok(services)) => {
-                    egui::Grid::new(("services-grid", self.id)).striped(true).num_columns(5).spacing([14.0, 4.0]).show(ui, |ui| {
-                        for h in ["", "Kind", "Name", "State", "Detail"] {
-                            ui.label(RichText::new(h).strong());
-                        }
-                        ui.end_row();
-                        for s in services {
-                            dot(ui, if s.ok { GREEN } else { RED });
-                            ui.label(RichText::new(s.kind.label()).weak());
-                            ui.label(RichText::new(&s.name).strong());
-                            ui.label(&s.state);
-                            ui.label(RichText::new(&s.detail).monospace());
+                    egui::Grid::new(("services-grid", self.id)).striped(true).num_columns(5).spacing([14.0, 4.0]).show(
+                        ui,
+                        |ui| {
+                            for h in ["", "Kind", "Name", "State", "Detail"] {
+                                ui.label(RichText::new(h).strong());
+                            }
                             ui.end_row();
-                        }
-                    });
+                            for s in services {
+                                dot(ui, if s.ok { GREEN } else { RED });
+                                ui.label(RichText::new(s.kind.label()).weak());
+                                ui.label(RichText::new(&s.name).strong());
+                                ui.label(&s.state);
+                                ui.label(RichText::new(&s.detail).monospace());
+                                ui.end_row();
+                            }
+                        },
+                    );
                 }
                 Task::Idle => {}
             });

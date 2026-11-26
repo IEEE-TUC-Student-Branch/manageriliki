@@ -77,12 +77,7 @@ pub struct SshConfig {
 
 impl Default for SshConfig {
     fn default() -> Self {
-        SshConfig {
-            host: String::new(),
-            port: 22,
-            username: "root".into(),
-            auth: SshAuth::Agent,
-        }
+        SshConfig { host: String::new(), port: 22, username: "root".into(), auth: SshAuth::Agent }
     }
 }
 
@@ -120,10 +115,7 @@ impl SerialConfig {
             Parity::Odd => 'O',
             Parity::Even => 'E',
         };
-        format!(
-            "{} {} {}{}{}",
-            self.device, self.baud, self.data_bits, parity, self.stop_bits
-        )
+        format!("{} {} {}{}{}", self.device, self.baud, self.data_bits, parity, self.stop_bits)
     }
 }
 

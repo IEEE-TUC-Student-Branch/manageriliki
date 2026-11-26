@@ -38,14 +38,7 @@ pub struct Form {
 
 impl Form {
     pub fn new(title: impl Into<String>) -> Self {
-        Form {
-            title: title.into(),
-            hint: String::new(),
-            error: None,
-            submit: "save",
-            fields: Vec::new(),
-            focus: 0,
-        }
+        Form { title: title.into(), hint: String::new(), error: None, submit: "save", fields: Vec::new(), focus: 0 }
     }
 
     pub fn hint(mut self, hint: impl Into<String>) -> Self {
@@ -99,10 +92,7 @@ impl Form {
     }
 
     fn field(&self, key: &str) -> &Field {
-        self.fields
-            .iter()
-            .find(|f| f.key == key)
-            .unwrap_or_else(|| panic!("form has no field '{key}'"))
+        self.fields.iter().find(|f| f.key == key).unwrap_or_else(|| panic!("form has no field '{key}'"))
     }
 
     /// The field's value: text, the selected option, or "on"/"off".
@@ -119,20 +109,13 @@ impl Form {
     }
 
     fn enabled(&self, idx: usize) -> bool {
-        self.fields[idx]
-            .depends
-            .iter()
-            .all(|(key, allowed)| allowed.contains(&self.get(key).as_str()))
+        self.fields[idx].depends.iter().all(|(key, allowed)| allowed.contains(&self.get(key).as_str()))
     }
 
     fn move_focus(&mut self, forward: bool) {
         let n = self.fields.len();
         for step in 1..=n {
-            let idx = if forward {
-                (self.focus + step) % n
-            } else {
-                (self.focus + n - step) % n
-            };
+            let idx = if forward { (self.focus + step) % n } else { (self.focus + n - step) % n };
             if self.enabled(idx) {
                 self.focus = idx;
                 return;
@@ -163,9 +146,7 @@ impl Form {
                     (FieldKind::Choice { options, idx }, KeyCode::Left) => {
                         *idx = (*idx + options.len() - 1) % options.len()
                     }
-                    (FieldKind::Toggle(on), KeyCode::Left | KeyCode::Right | KeyCode::Char(' ')) => {
-                        *on = !*on
-                    }
+                    (FieldKind::Toggle(on), KeyCode::Left | KeyCode::Right | KeyCode::Char(' ')) => *on = !*on,
                     _ => {}
                 }
             }
@@ -249,17 +230,8 @@ fn tail(s: &str, width: usize) -> String {
 }
 
 pub fn centered(area: Rect, width: u16, height: u16) -> Rect {
-    let [_, v, _] = Layout::vertical([
-        Constraint::Fill(1),
-        Constraint::Length(height),
-        Constraint::Fill(1),
-    ])
-    .areas(area);
-    let [_, h, _] = Layout::horizontal([
-        Constraint::Fill(1),
-        Constraint::Length(width),
-        Constraint::Fill(1),
-    ])
-    .areas(v);
+    let [_, v, _] =
+        Layout::vertical([Constraint::Fill(1), Constraint::Length(height), Constraint::Fill(1)]).areas(area);
+    let [_, h, _] = Layout::horizontal([Constraint::Fill(1), Constraint::Length(width), Constraint::Fill(1)]).areas(v);
     h
 }

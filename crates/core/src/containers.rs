@@ -82,8 +82,7 @@ pub enum ContainerAction {
 }
 
 impl ContainerAction {
-    pub const ALL: [ContainerAction; 3] =
-        [ContainerAction::Start, ContainerAction::Stop, ContainerAction::Restart];
+    pub const ALL: [ContainerAction; 3] = [ContainerAction::Start, ContainerAction::Stop, ContainerAction::Restart];
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -97,11 +96,7 @@ impl ContainerAction {
 impl Container {
     /// `namespace/name` for pods, the name otherwise.
     pub fn display_name(&self) -> String {
-        if self.namespace.is_empty() {
-            self.name.clone()
-        } else {
-            format!("{}/{}", self.namespace, self.name)
-        }
+        if self.namespace.is_empty() { self.name.clone() } else { format!("{}/{}", self.namespace, self.name) }
     }
 
     /// The tool that manages it, e.g. `docker`, `incus`, `pct`, `k3s kubectl`.
@@ -180,11 +175,9 @@ impl Container {
                 };
                 format!("{} {verb} {id}", self.cli())
             }
-            Tool::Kubectl(_) if action == ContainerAction::Restart => format!(
-                "{} delete pod -n {} {id} --wait=false",
-                self.cli(),
-                quote(&self.namespace)
-            ),
+            Tool::Kubectl(_) if action == ContainerAction::Restart => {
+                format!("{} delete pod -n {} {id} --wait=false", self.cli(), quote(&self.namespace))
+            }
             Tool::Kubectl(_) => {
                 return Err(invalid("pods cannot be started or stopped; scale their controller instead"));
             }
@@ -220,12 +213,9 @@ impl Container {
             }
             Tool::LxcClassic => self.lxc_exec(SHELL),
             Tool::Proxmox => format!("{} enter {id}", self.cli()),
-            Tool::Kubectl(_) => format!(
-                "{} exec -it -n {} {id} -- sh -c {}",
-                self.cli(),
-                quote(&self.namespace),
-                quote(SHELL)
-            ),
+            Tool::Kubectl(_) => {
+                format!("{} exec -it -n {} {id} -- sh -c {}", self.cli(), quote(&self.namespace), quote(SHELL))
+            }
         }
     }
 }
@@ -282,8 +272,7 @@ pub(crate) trait Exec {
 }
 
 /// Directories that non-interactive SSH sessions often leave out of PATH.
-const PATH_PREFIX: &str =
-    "PATH=\"$PATH:/usr/local/sbin:/usr/local/bin:/usr/sbin:/sbin:/snap/bin\"; export PATH; ";
+const PATH_PREFIX: &str = "PATH=\"$PATH:/usr/local/sbin:/usr/local/bin:/usr/sbin:/sbin:/snap/bin\"; export PATH; ";
 
 impl Exec for SshConnection {
     fn exec(&self, command: &str) -> Result<ExecResult> {
@@ -326,8 +315,7 @@ fn failure(what: &str, out: &ExecResult) -> String {
 const DETECT: &str = "for t in docker podman incus lxc lxc-ls pct kubectl k3s microk8s; do \
     command -v \"$t\" >/dev/null 2>&1 && echo \"$t\"; done; [ \"$(id -u)\" = 0 ] && echo '#root'; true";
 
-const DOCKER_PS: &str =
-    "ps -a --format '{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.State}}\t{{.Status}}\t{{.Ports}}'";
+const DOCKER_PS: &str = "ps -a --format '{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.State}}\t{{.Status}}\t{{.Ports}}'";
 
 pub(crate) fn list(x: &dyn Exec) -> Result<ContainerList> {
     let found = x.exec(DETECT)?.stdout;
@@ -373,19 +361,11 @@ pub(crate) fn list(x: &dyn Exec) -> Result<ContainerList> {
     // Proxmox also ships the lxc-* tools; pct is the authoritative view there.
     if has("pct") {
         let (out, sudo) = run_tool(x, "pct", "list", root)?;
-        let r = if out.exit_status == 0 {
-            Ok(parse_pct(&out.stdout, sudo))
-        } else {
-            Err(failure("pct", &out))
-        };
+        let r = if out.exit_status == 0 { Ok(parse_pct(&out.stdout, sudo)) } else { Err(failure("pct", &out)) };
         add(&mut list, Runtime::Lxc, r);
     } else if has("lxc-ls") {
         let (out, sudo) = run_tool(x, "lxc-ls", "-f -F NAME,STATE,IPV4", root)?;
-        let r = if out.exit_status == 0 {
-            Ok(parse_lxc_ls(&out.stdout, sudo))
-        } else {
-            Err(failure("lxc-ls", &out))
-        };
+        let r = if out.exit_status == 0 { Ok(parse_lxc_ls(&out.stdout, sudo)) } else { Err(failure("lxc-ls", &out)) };
         add(&mut list, Runtime::Lxc, r);
     }
 
@@ -616,22 +596,15 @@ fn parse_pods(out: &str, kubectl: &str, sudo: bool) -> std::result::Result<Vec<C
             let total = p["spec"]["containers"].as_array().map_or(0, |c| c.len());
             let ready = statuses.iter().filter(|s| s["ready"].as_bool() == Some(true)).count();
             let restarts: u64 = statuses.iter().filter_map(|s| s["restartCount"].as_u64()).sum();
-            let waiting = statuses
-                .iter()
-                .find_map(|s| s["state"]["waiting"]["reason"].as_str())
-                .map(str::to_string);
+            let waiting = statuses.iter().find_map(|s| s["state"]["waiting"]["reason"].as_str()).map(str::to_string);
             let phase = str_at(p, &["status", "phase"]);
             let state = if !p["metadata"]["deletionTimestamp"].is_null() {
                 "Terminating".to_string()
             } else {
                 waiting.unwrap_or_else(|| phase.to_string())
             };
-            let images: Vec<&str> = p["spec"]["containers"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .map(|c| str_at(c, &["image"]))
-                .collect();
+            let images: Vec<&str> =
+                p["spec"]["containers"].as_array().into_iter().flatten().map(|c| str_at(c, &["image"])).collect();
             let node = str_at(p, &["spec", "nodeName"]);
             let mut status = format!("{ready}/{total} ready");
             if restarts > 0 {
@@ -715,7 +688,9 @@ fn parse_pod_services(pod: &str, services: &str) -> Result<Vec<ContainerService>
         let name = str_at(c, &["name"]);
         let st = statuses.iter().find(|s| str_at(s, &["name"]) == name);
         let (state, ok) = match st.map(|s| &s["state"]) {
-            Some(s) if s["running"].is_object() => ("running".to_string(), st.unwrap()["ready"].as_bool() == Some(true)),
+            Some(s) if s["running"].is_object() => {
+                ("running".to_string(), st.unwrap()["ready"].as_bool() == Some(true))
+            }
             Some(s) if s["waiting"].is_object() => (str_at(s, &["waiting", "reason"]).to_string(), false),
             Some(s) if s["terminated"].is_object() => (str_at(s, &["terminated", "reason"]).to_string(), false),
             _ => ("pending".to_string(), false),
@@ -828,7 +803,12 @@ mod tests {
         let fake = Fake {
             rules: vec![
                 ("for t in", 0, "docker\nlxc-ls\nkubectl\n", ""),
-                ("sudo -n docker ps", 0, "abc123\tweb\tnginx:1.27\trunning\tUp 3 hours\t0.0.0.0:8080->80/tcp, :::8080->80/tcp\n", ""),
+                (
+                    "sudo -n docker ps",
+                    0,
+                    "abc123\tweb\tnginx:1.27\trunning\tUp 3 hours\t0.0.0.0:8080->80/tcp, :::8080->80/tcp\n",
+                    "",
+                ),
                 ("docker ps", 1, "", "permission denied while trying to connect to the Docker daemon socket"),
                 ("lxc-ls", 0, "NAME   STATE   IPV4\nbox1   RUNNING 10.0.3.5, 10.0.3.6\nbox2   STOPPED -\n", ""),
                 ("kubectl get pods", 1, "", "The connection to the server localhost:8080 was refused"),
@@ -865,14 +845,21 @@ mod tests {
         )
         .remove(0);
         let fake = Fake {
-            rules: vec![("docker top 'abc' -o pid,user,args", 0,
-                "PID  USER  COMMAND\n101  root  nginx: master process nginx -g daemon off;\n140  101   nginx: worker process\n", "")],
+            rules: vec![(
+                "docker top 'abc' -o pid,user,args",
+                0,
+                "PID  USER  COMMAND\n101  root  nginx: master process nginx -g daemon off;\n140  101   nginx: worker process\n",
+                "",
+            )],
             log: RefCell::new(Vec::new()),
         };
         let s = services(&fake, &c).unwrap();
         assert_eq!(s.len(), 4);
         assert_eq!((s[0].kind, s[0].name.as_str()), (ServiceKind::Port, "0.0.0.0:8080->80/tcp"));
-        assert_eq!((s[2].kind, s[2].name.as_str(), s[2].state.as_str()), (ServiceKind::Process, "nginx:", "pid 101 · root"));
+        assert_eq!(
+            (s[2].kind, s[2].name.as_str(), s[2].state.as_str()),
+            (ServiceKind::Process, "nginx:", "pid 101 · root")
+        );
     }
 
     #[test]
@@ -888,9 +875,13 @@ mod tests {
         .remove(0);
         assert_eq!((c.image.as_str(), c.ports.as_str(), c.running), ("Debian 12", "10.1.1.4", true));
         let fake = Fake {
-            rules: vec![("incus exec 'db' -- sh -c", 0,
+            rules: vec![(
+                "incus exec 'db' -- sh -c",
+                0,
                 "#systemd\ncron.service loaded active running Regular background program processing daemon\n\
-                 ● postgresql.service loaded failed failed PostgreSQL RDBMS\nfoo.service not-found inactive dead foo.service\n", "")],
+                 ● postgresql.service loaded failed failed PostgreSQL RDBMS\nfoo.service not-found inactive dead foo.service\n",
+                "",
+            )],
             log: RefCell::new(Vec::new()),
         };
         let s = services(&fake, &c).unwrap();
@@ -917,13 +908,19 @@ mod tests {
         assert_eq!((s[0].name.as_str(), s[0].ok), ("nginx", true));
         assert_eq!(s[0].detail, "nginx:1.27 · ports 80/TCP");
         assert_eq!((s[1].state.as_str(), s[1].ok), ("CrashLoopBackOff", false));
-        assert_eq!((s[2].kind, s[2].name.as_str(), s[2].state.as_str()), (ServiceKind::KubeService, "web", "LoadBalancer"));
+        assert_eq!(
+            (s[2].kind, s[2].name.as_str(), s[2].state.as_str()),
+            (ServiceKind::KubeService, "web", "LoadBalancer")
+        );
         assert_eq!(s[2].detail, "10.43.1.2 · 443/TCP→8443 (node 30443) · external 192.168.1.50");
     }
 
     #[test]
     fn proxmox_and_quoting() {
-        let cts = parse_pct("VMID       Status     Lock         Name\n100        running                 dns\n101        stopped    backup       old'one\n", false);
+        let cts = parse_pct(
+            "VMID       Status     Lock         Name\n100        running                 dns\n101        stopped    backup       old'one\n",
+            false,
+        );
         assert_eq!(cts.len(), 2);
         assert_eq!((cts[0].id.as_str(), cts[0].name.as_str(), cts[0].running), ("100", "dns", true));
         assert_eq!(cts[1].status, "stopped, locked: backup");

@@ -72,10 +72,8 @@ impl StatusMonitor {
             loop {
                 {
                     let wake = worker.wake.lock().unwrap_or_else(|e| e.into_inner());
-                    let (mut wake, _) = worker
-                        .cv
-                        .wait_timeout_while(wake, interval, |w| !*w)
-                        .unwrap_or_else(|e| e.into_inner());
+                    let (mut wake, _) =
+                        worker.cv.wait_timeout_while(wake, interval, |w| !*w).unwrap_or_else(|e| e.into_inner());
                     *wake = false;
                 }
                 if worker.stop.load(Ordering::Relaxed) {
@@ -89,8 +87,7 @@ impl StatusMonitor {
                         .collect();
                     handles.into_iter().filter_map(|h| h.join().ok()).collect()
                 });
-                *worker.statuses.lock().unwrap_or_else(|e| e.into_inner()) =
-                    results.into_iter().collect();
+                *worker.statuses.lock().unwrap_or_else(|e| e.into_inner()) = results.into_iter().collect();
                 notify();
             }
         });
@@ -109,13 +106,7 @@ impl StatusMonitor {
     }
 
     pub fn get(&self, id: i64) -> Status {
-        self.shared
-            .statuses
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .get(&id)
-            .cloned()
-            .unwrap_or(Status::Unknown)
+        self.shared.statuses.lock().unwrap_or_else(|e| e.into_inner()).get(&id).cloned().unwrap_or(Status::Unknown)
     }
 }
 

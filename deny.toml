@@ -1,0 +1,51 @@
+# cargo-deny policy, checked in CI (`cargo deny check`).
+# https://embarkstudios.github.io/cargo-deny/
+
+[graph]
+targets = ["x86_64-unknown-linux-gnu"]
+all-features = true
+
+[advisories]
+# Fail on any RustSec vulnerability, and on crates that are yanked.
+# Unmaintained/unsound notices fail too, but only for direct dependencies.
+yanked = "deny"
+unmaintained = "workspace"
+unsound = "all"
+ignore = [
+    # { id = "RUSTSEC-0000-0000", reason = "why this does not affect us" },
+]
+
+[licenses]
+confidence-threshold = 0.9
+# Permissive licenses only. Dual-licensed crates (e.g. "MIT OR GPL-3.0") pass
+# through their permissive option.
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "ISC",
+    "MIT",
+    "MPL-2.0",
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Unlicense",
+    "WTFPL",
+    "Zlib",
+]
+
+[bans]
+multiple-versions = "allow"
+# Every dependency must have a real version requirement.
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+# Only crates.io; no git or alternative registries can sneak in.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

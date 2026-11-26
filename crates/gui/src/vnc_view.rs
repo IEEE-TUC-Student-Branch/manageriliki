@@ -2,8 +2,8 @@
 //! forwards pointer and keyboard input.
 
 use eframe::egui::{
-    self, Color32, ColorImage, CornerRadius, CursorIcon, Event, EventFilter, Key, Modifiers,
-    PointerButton, Rect, RichText, Sense, TextureHandle, TextureOptions, Ui, pos2,
+    self, Color32, ColorImage, CornerRadius, CursorIcon, Event, EventFilter, Key, Modifiers, PointerButton, Rect,
+    RichText, Sense, TextureHandle, TextureOptions, Ui, pos2,
 };
 use manageriliki_core::{VncSession, VncState, keysym};
 
@@ -40,10 +40,7 @@ impl VncView {
             ui.separator();
             ui.checkbox(&mut self.view_only, "View only");
             let connected = state == VncState::Connected;
-            if ui
-                .add_enabled(connected && !self.view_only, egui::Button::new("Ctrl+Alt+Del"))
-                .clicked()
-            {
+            if ui.add_enabled(connected && !self.view_only, egui::Button::new("Ctrl+Alt+Del")).clicked() {
                 self.session.ctrl_alt_del();
             }
             ui.separator();
@@ -116,12 +113,7 @@ impl VncView {
         let id = egui::Id::new(("vnc-view", self.id));
         let response = ui.interact(rect, id, Sense::click_and_drag());
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Other, true, "Remote display"));
-        ui.painter().image(
-            texture.id(),
-            rect,
-            Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-            Color32::WHITE,
-        );
+        ui.painter().image(texture.id(), rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
 
         if response.clicked() || response.drag_started() {
             response.request_focus();
@@ -160,7 +152,9 @@ impl VncView {
     fn pointer(&mut self, ui: &Ui, rect: Rect, scale: f32, active: bool) {
         let (pos, buttons, wheel) = ui.input(|i| {
             let mut buttons = 0u8;
-            for (button, bit) in [(PointerButton::Primary, 1), (PointerButton::Middle, 2), (PointerButton::Secondary, 4)] {
+            for (button, bit) in
+                [(PointerButton::Primary, 1), (PointerButton::Middle, 2), (PointerButton::Secondary, 4)]
+            {
                 if i.pointer.button_down(button) {
                     buttons |= bit;
                 }

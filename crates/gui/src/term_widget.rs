@@ -2,8 +2,8 @@
 //! keyboard input to it.
 
 use eframe::egui::{
-    self, Align2, Color32, CornerRadius, Event, EventFilter, FontId, Key, Modifiers, Rect, Sense,
-    Stroke, StrokeKind, TextFormat, Ui, pos2, text::LayoutJob, vec2,
+    self, Align2, Color32, CornerRadius, Event, EventFilter, FontId, Key, Modifiers, Rect, Sense, Stroke, StrokeKind,
+    TextFormat, Ui, pos2, text::LayoutJob, vec2,
 };
 use manageriliki_core::{Terminal, TerminalState, vt100};
 
@@ -58,9 +58,7 @@ fn color(c: vt100::Color, default: Color32, bold: bool) -> Color32 {
 /// Draws the terminal filling the available space and handles its input.
 pub fn show(ui: &mut Ui, term: &Terminal, id: egui::Id) {
     let font = FontId::monospace(FONT_SIZE);
-    let (cw, ch) = ui
-        .ctx()
-        .fonts_mut(|f| (f.glyph_width(&font, 'M'), f.row_height(&font)));
+    let (cw, ch) = ui.ctx().fonts_mut(|f| (f.glyph_width(&font, 'M'), f.row_height(&font)));
 
     let avail = ui.available_size();
     let cols = ((avail.x / cw).floor() as u16).max(10);
@@ -77,12 +75,7 @@ pub fn show(ui: &mut Ui, term: &Terminal, id: egui::Id) {
         m.interested_in_focus(id, ui.layer_id());
         m.set_focus_lock_filter(
             id,
-            EventFilter {
-                tab: true,
-                horizontal_arrows: true,
-                vertical_arrows: true,
-                escape: true,
-            },
+            EventFilter { tab: true, horizontal_arrows: true, vertical_arrows: true, escape: true },
         );
     });
     let focused = ui.memory(|m| m.has_focus(id));
@@ -133,11 +126,7 @@ pub fn show(ui: &mut Ui, term: &Terminal, id: egui::Id) {
                 if bg != DEFAULT_BG {
                     let w = if cell.is_wide() { 2.0 * cw } else { cw };
                     let x = origin.x + col as f32 * cw;
-                    painter.rect_filled(
-                        Rect::from_min_size(pos2(x, y), vec2(w, ch)),
-                        CornerRadius::ZERO,
-                        bg,
-                    );
+                    painter.rect_filled(Rect::from_min_size(pos2(x, y), vec2(w, ch)), CornerRadius::ZERO, bg);
                 }
                 let text = if cell.has_contents() { cell.contents() } else { " " };
                 job.append(
@@ -158,10 +147,7 @@ pub fn show(ui: &mut Ui, term: &Terminal, id: egui::Id) {
 
         if !screen.hide_cursor() && screen.scrollback() == 0 {
             let (r, c) = screen.cursor_position();
-            let cursor = Rect::from_min_size(
-                pos2(origin.x + c as f32 * cw, origin.y + r as f32 * ch),
-                vec2(cw, ch),
-            );
+            let cursor = Rect::from_min_size(pos2(origin.x + c as f32 * cw, origin.y + r as f32 * ch), vec2(cw, ch));
             if focused {
                 painter.rect_filled(cursor, CornerRadius::ZERO, DEFAULT_FG.gamma_multiply(0.5));
             } else {
@@ -182,9 +168,7 @@ pub fn show(ui: &mut Ui, term: &Terminal, id: egui::Id) {
     let overlay = match term.state() {
         TerminalState::Connecting => Some(("Connecting…".to_string(), Color32::LIGHT_BLUE)),
         TerminalState::Closed(_) => Some(("Session closed".to_string(), Color32::LIGHT_RED)),
-        TerminalState::Connected if !focused => {
-            Some(("Click to type".to_string(), Color32::from_gray(140)))
-        }
+        TerminalState::Connected if !focused => Some(("Click to type".to_string(), Color32::from_gray(140))),
         TerminalState::Connected => None,
     };
     if let Some((text, col)) = overlay {
@@ -206,9 +190,7 @@ fn handle_input(ui: &Ui, term: &Terminal) {
     for event in events {
         match event {
             Event::Text(text) => out.extend_from_slice(text.as_bytes()),
-            Event::Paste(text) if bracketed => {
-                out.extend_from_slice(format!("\x1b[200~{text}\x1b[201~").as_bytes())
-            }
+            Event::Paste(text) if bracketed => out.extend_from_slice(format!("\x1b[200~{text}\x1b[201~").as_bytes()),
             Event::Paste(text) => out.extend_from_slice(text.replace('\n', "\r").as_bytes()),
             // egui turns Ctrl+C / Ctrl+X into clipboard events; a terminal wants the control codes.
             Event::Copy => out.push(0x03),

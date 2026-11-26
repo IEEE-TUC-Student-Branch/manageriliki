@@ -9,7 +9,8 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 use crate::error::{Error, Result};
 use crate::models::{AuditEntry, Group, Role, SerialConfig, Server, SshConfig, User, VncConfig};
 
-const MIGRATIONS: &[&str] = &[r#"
+const MIGRATIONS: &[&str] = &[
+    r#"
     CREATE TABLE users (
         id            INTEGER PRIMARY KEY,
         username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
@@ -38,16 +39,19 @@ const MIGRATIONS: &[&str] = &[r#"
         target   TEXT NOT NULL,
         detail   TEXT NOT NULL
     );
-"#, r#"
+"#,
+    r#"
     ALTER TABLE servers ADD COLUMN vnc TEXT;
     ALTER TABLE servers ADD COLUMN vnc_secret BLOB;
-"#, r#"
+"#,
+    r#"
     CREATE TABLE groups (
         id   INTEGER PRIMARY KEY,
         name TEXT NOT NULL UNIQUE COLLATE NOCASE
     );
     INSERT OR IGNORE INTO groups (name) SELECT DISTINCT grp FROM servers WHERE grp <> '' ORDER BY grp;
-"#];
+"#,
+];
 
 pub fn open(path: &Path) -> Result<Connection> {
     let mut conn = Connection::open(path)?;
@@ -62,9 +66,7 @@ fn migrate(conn: &mut Connection) -> Result<()> {
     let version: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
     let version = version as usize;
     if version > MIGRATIONS.len() {
-        return Err(Error::Invalid(format!(
-            "database schema v{version} is newer than this program supports"
-        )));
+        return Err(Error::Invalid(format!("database schema v{version} is newer than this program supports")));
     }
     for (i, sql) in MIGRATIONS.iter().enumerate().skip(version) {
         let tx = conn.transaction()?;
@@ -109,11 +111,7 @@ pub fn count_users(conn: &Connection) -> Result<i64> {
 }
 
 pub fn count_active_admins(conn: &Connection) -> Result<i64> {
-    Ok(conn.query_row(
-        "SELECT COUNT(*) FROM users WHERE role = 'admin' AND disabled = 0",
-        [],
-        |r| r.get(0),
-    )?)
+    Ok(conn.query_row("SELECT COUNT(*) FROM users WHERE role = 'admin' AND disabled = 0", [], |r| r.get(0))?)
 }
 
 pub fn list_users(conn: &Connection) -> Result<Vec<User>> {
@@ -123,30 +121,22 @@ pub fn list_users(conn: &Connection) -> Result<Vec<User>> {
 }
 
 pub fn get_user(conn: &Connection, id: i64) -> Result<User> {
-    conn.query_row(
-        &format!("SELECT {USER_COLS} FROM users WHERE id = ?1"),
-        [id],
-        user_from_row,
-    )
-    .optional()?
-    .ok_or_else(|| Error::NotFound(format!("user #{id}")))
+    conn.query_row(&format!("SELECT {USER_COLS} FROM users WHERE id = ?1"), [id], user_from_row)
+        .optional()?
+        .ok_or_else(|| Error::NotFound(format!("user #{id}")))
 }
 
 /// Returns the user and their password hash.
 pub fn find_user_for_login(conn: &Connection, username: &str) -> Result<Option<(User, String)>> {
     Ok(conn
-        .query_row(
-            &format!("SELECT {USER_COLS}, password_hash FROM users WHERE username = ?1"),
-            [username],
-            |r| Ok((user_from_row(r)?, r.get("password_hash")?)),
-        )
+        .query_row(&format!("SELECT {USER_COLS}, password_hash FROM users WHERE username = ?1"), [username], |r| {
+            Ok((user_from_row(r)?, r.get("password_hash")?))
+        })
         .optional()?)
 }
 
 pub fn password_hash(conn: &Connection, id: i64) -> Result<String> {
-    Ok(conn.query_row("SELECT password_hash FROM users WHERE id = ?1", [id], |r| {
-        r.get(0)
-    })?)
+    Ok(conn.query_row("SELECT password_hash FROM users WHERE id = ?1", [id], |r| r.get(0))?)
 }
 
 pub fn insert_user(conn: &Connection, username: &str, hash: &str, role: Role) -> Result<i64> {
@@ -159,26 +149,17 @@ pub fn insert_user(conn: &Connection, username: &str, hash: &str, role: Role) ->
 }
 
 pub fn update_user(conn: &Connection, id: i64, role: Role, disabled: bool) -> Result<()> {
-    conn.execute(
-        "UPDATE users SET role = ?2, disabled = ?3 WHERE id = ?1",
-        params![id, role.as_str(), disabled],
-    )?;
+    conn.execute("UPDATE users SET role = ?2, disabled = ?3 WHERE id = ?1", params![id, role.as_str(), disabled])?;
     Ok(())
 }
 
 pub fn set_password_hash(conn: &Connection, id: i64, hash: &str) -> Result<()> {
-    conn.execute(
-        "UPDATE users SET password_hash = ?2 WHERE id = ?1",
-        params![id, hash],
-    )?;
+    conn.execute("UPDATE users SET password_hash = ?2 WHERE id = ?1", params![id, hash])?;
     Ok(())
 }
 
 pub fn touch_last_login(conn: &Connection, id: i64) -> Result<()> {
-    conn.execute(
-        "UPDATE users SET last_login = ?2 WHERE id = ?1",
-        params![id, Utc::now()],
-    )?;
+    conn.execute("UPDATE users SET last_login = ?2 WHERE id = ?1", params![id, Utc::now()])?;
     Ok(())
 }
 
@@ -209,21 +190,15 @@ fn server_from_row(row: &Row) -> rusqlite::Result<Server> {
 }
 
 pub fn list_servers(conn: &Connection) -> Result<Vec<Server>> {
-    let mut stmt = conn.prepare(&format!(
-        "SELECT {SERVER_COLS} FROM servers ORDER BY grp, name"
-    ))?;
+    let mut stmt = conn.prepare(&format!("SELECT {SERVER_COLS} FROM servers ORDER BY grp, name"))?;
     let servers = stmt.query_map([], server_from_row)?.collect::<rusqlite::Result<_>>()?;
     Ok(servers)
 }
 
 pub fn get_server(conn: &Connection, id: i64) -> Result<Server> {
-    conn.query_row(
-        &format!("SELECT {SERVER_COLS} FROM servers WHERE id = ?1"),
-        [id],
-        server_from_row,
-    )
-    .optional()?
-    .ok_or_else(|| Error::NotFound(format!("server #{id}")))
+    conn.query_row(&format!("SELECT {SERVER_COLS} FROM servers WHERE id = ?1"), [id], server_from_row)
+        .optional()?
+        .ok_or_else(|| Error::NotFound(format!("server #{id}")))
 }
 
 pub struct ServerRow<'a> {
@@ -240,15 +215,7 @@ pub fn insert_server(conn: &Connection, s: &ServerRow) -> Result<i64> {
     conn.execute(
         "INSERT INTO servers (name, grp, notes, ssh, serial, vnc, required_role)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![
-            s.name,
-            s.group,
-            s.notes,
-            to_json(s.ssh),
-            to_json(s.serial),
-            to_json(s.vnc),
-            s.required_role.as_str()
-        ],
+        params![s.name, s.group, s.notes, to_json(s.ssh), to_json(s.serial), to_json(s.vnc), s.required_role.as_str()],
     )
     .map_err(|e| unique_violation(e, format!("a server named '{}' already exists", s.name)))?;
     Ok(conn.last_insert_rowid())
@@ -302,10 +269,7 @@ pub fn set_secret(conn: &Connection, id: i64, slot: SecretSlot, secret: Option<&
 }
 
 pub fn set_host_key(conn: &Connection, id: i64, fp: Option<&str>) -> Result<()> {
-    conn.execute(
-        "UPDATE servers SET host_key_fp = ?2 WHERE id = ?1",
-        params![id, fp],
-    )?;
+    conn.execute("UPDATE servers SET host_key_fp = ?2 WHERE id = ?1", params![id, fp])?;
     Ok(())
 }
 
@@ -338,9 +302,7 @@ pub fn get_group(conn: &Connection, id: i64) -> Result<Group> {
 
 /// The stored spelling of a group name, matched case-insensitively.
 pub fn find_group_name(conn: &Connection, name: &str) -> Result<Option<String>> {
-    Ok(conn
-        .query_row("SELECT name FROM groups WHERE name = ?1", [name], |r| r.get(0))
-        .optional()?)
+    Ok(conn.query_row("SELECT name FROM groups WHERE name = ?1", [name], |r| r.get(0)).optional()?)
 }
 
 pub fn insert_group(conn: &Connection, name: &str) -> Result<i64> {
@@ -354,10 +316,7 @@ pub fn rename_group(conn: &mut Connection, id: i64, old: &str, new: &str) -> Res
     let tx = conn.transaction()?;
     tx.execute("UPDATE groups SET name = ?2 WHERE id = ?1", params![id, new])
         .map_err(|e| unique_violation(e, format!("group '{new}' already exists")))?;
-    tx.execute(
-        "UPDATE servers SET grp = ?2 WHERE grp = ?1 COLLATE NOCASE",
-        params![old, new],
-    )?;
+    tx.execute("UPDATE servers SET grp = ?2 WHERE grp = ?1 COLLATE NOCASE", params![old, new])?;
     tx.commit()?;
     Ok(())
 }
@@ -382,9 +341,8 @@ pub fn audit(conn: &Connection, username: &str, action: &str, target: &str, deta
 }
 
 pub fn list_audit(conn: &Connection, limit: usize) -> Result<Vec<AuditEntry>> {
-    let mut stmt = conn.prepare(
-        "SELECT id, ts, username, action, target, detail FROM audit ORDER BY id DESC LIMIT ?1",
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT id, ts, username, action, target, detail FROM audit ORDER BY id DESC LIMIT ?1")?;
     let rows = stmt
         .query_map([limit as i64], |r| {
             Ok(AuditEntry {
@@ -402,9 +360,7 @@ pub fn list_audit(conn: &Connection, limit: usize) -> Result<Vec<AuditEntry>> {
 
 fn unique_violation(e: rusqlite::Error, msg: String) -> Error {
     match e {
-        rusqlite::Error::SqliteFailure(f, _)
-            if f.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE =>
-        {
+        rusqlite::Error::SqliteFailure(f, _) if f.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE => {
             Error::Invalid(msg)
         }
         e => Error::Db(e),

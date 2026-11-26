@@ -1,0 +1,60 @@
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # New advisories appear without any code change, so also check weekly.
+  schedule:
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cargo-deny:
+    name: Dependencies (${{ matrix.check }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # advisories: known vulnerabilities (RustSec) and yanked crates
+        # licenses / bans / sources: the policy in deny.toml
+        check: [advisories, "licenses bans sources"]
+    # Don't block unrelated PRs on an advisory published today; the weekly run reports it.
+    continue-on-error: ${{ matrix.check == 'advisories' && github.event_name == 'pull_request' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check ${{ matrix.check }}
+
+  secrets:
+    name: Committed secrets
+    runs-on: ubuntu-24.04
+    env:
+      GITLEAKS_VERSION: 8.18.4
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks
+        run: |
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            | tar -xz -C "$RUNNER_TEMP" gitleaks
+      - name: Scan full git history
+        run: $RUNNER_TEMP/gitleaks detect --source . --config .gitleaks.toml --redact --verbose
+
+  unsafe-code:
+    name: No unsafe code
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Every crate root forbids unsafe
+        run: |
+          fail=0
+          for f in crates/core/src/lib.rs crates/*/src/main.rs; do
+            grep -q '^#!\[forbid(unsafe_code)\]' "$f" || { echo "::error file=$f::missing #![forbid(unsafe_code)]"; fail=1; }
+          done
+          exit $fail

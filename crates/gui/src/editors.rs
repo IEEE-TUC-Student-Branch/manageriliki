@@ -15,7 +15,13 @@ pub enum DialogResult {
 }
 
 /// Shows a modal with Save/Cancel buttons; Escape or clicking outside cancels.
-fn modal(ctx: &egui::Context, id: &str, title: &str, error: &Option<String>, body: impl FnOnce(&mut Ui)) -> DialogResult {
+fn modal(
+    ctx: &egui::Context,
+    id: &str,
+    title: &str,
+    error: &Option<String>,
+    body: impl FnOnce(&mut Ui),
+) -> DialogResult {
     let mut result = DialogResult::Open;
     let response = egui::Modal::new(egui::Id::new(id)).show(ctx, |ui| {
         ui.set_width(440.0);
@@ -196,7 +202,12 @@ impl ServerEditor {
                         let label = if self.auth == AuthKind::Key { "Passphrase" } else { "Password" };
                         let hint = if self.has_secret { "stored — leave blank to keep" } else { "" };
                         row(ui, label, |ui| {
-                            ui.add(egui::TextEdit::singleline(&mut self.secret).password(true).hint_text(hint).desired_width(260.0));
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.secret)
+                                    .password(true)
+                                    .hint_text(hint)
+                                    .desired_width(260.0),
+                            );
                         });
                     }
                 });
@@ -210,21 +221,19 @@ impl ServerEditor {
                     row(ui, "Device", |ui| {
                         ui.horizontal(|ui| {
                             ui.add(egui::TextEdit::singleline(&mut s.device).desired_width(200.0));
-                            ui.menu_button("Detect", |ui| {
-                                match manageriliki_core::serial_ports() {
-                                    Ok(ports) if !ports.is_empty() => {
-                                        for p in ports {
-                                            if ui.button(&p).clicked() {
-                                                s.device = p;
-                                            }
+                            ui.menu_button("Detect", |ui| match manageriliki_core::serial_ports() {
+                                Ok(ports) if !ports.is_empty() => {
+                                    for p in ports {
+                                        if ui.button(&p).clicked() {
+                                            s.device = p;
                                         }
                                     }
-                                    Ok(_) => {
-                                        ui.label("No serial ports found");
-                                    }
-                                    Err(e) => {
-                                        ui.label(e.to_string());
-                                    }
+                                }
+                                Ok(_) => {
+                                    ui.label("No serial ports found");
+                                }
+                                Err(e) => {
+                                    ui.label(e.to_string());
                                 }
                             });
                         });
@@ -238,20 +247,29 @@ impl ServerEditor {
                     });
                     row(ui, "Framing", |ui| {
                         ui.horizontal(|ui| {
-                            egui::ComboBox::from_id_salt("bits").width(50.0).selected_text(format!("{} bits", s.data_bits)).show_ui(ui, |ui| {
-                                for b in [8u8, 7, 6, 5] {
-                                    ui.selectable_value(&mut s.data_bits, b, b.to_string());
-                                }
-                            });
-                            egui::ComboBox::from_id_salt("parity").width(70.0).selected_text(format!("{:?} parity", s.parity)).show_ui(ui, |ui| {
-                                ui.selectable_value(&mut s.parity, Parity::None, "None");
-                                ui.selectable_value(&mut s.parity, Parity::Odd, "Odd");
-                                ui.selectable_value(&mut s.parity, Parity::Even, "Even");
-                            });
-                            egui::ComboBox::from_id_salt("stop").width(50.0).selected_text(format!("{} stop", s.stop_bits)).show_ui(ui, |ui| {
-                                ui.selectable_value(&mut s.stop_bits, 1, "1");
-                                ui.selectable_value(&mut s.stop_bits, 2, "2");
-                            });
+                            egui::ComboBox::from_id_salt("bits")
+                                .width(50.0)
+                                .selected_text(format!("{} bits", s.data_bits))
+                                .show_ui(ui, |ui| {
+                                    for b in [8u8, 7, 6, 5] {
+                                        ui.selectable_value(&mut s.data_bits, b, b.to_string());
+                                    }
+                                });
+                            egui::ComboBox::from_id_salt("parity")
+                                .width(70.0)
+                                .selected_text(format!("{:?} parity", s.parity))
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(&mut s.parity, Parity::None, "None");
+                                    ui.selectable_value(&mut s.parity, Parity::Odd, "Odd");
+                                    ui.selectable_value(&mut s.parity, Parity::Even, "Even");
+                                });
+                            egui::ComboBox::from_id_salt("stop")
+                                .width(50.0)
+                                .selected_text(format!("{} stop", s.stop_bits))
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(&mut s.stop_bits, 1, "1");
+                                    ui.selectable_value(&mut s.stop_bits, 2, "2");
+                                });
                         });
                     });
                     row(ui, "Flow control", |ui| {
@@ -293,15 +311,22 @@ impl ServerEditor {
                     });
                     row(ui, "Password", |ui| {
                         let hint = if self.has_vnc_secret { "stored — leave blank to keep" } else { "none" };
-                        ui.add(egui::TextEdit::singleline(&mut self.vnc_secret).password(true).hint_text(hint).desired_width(260.0))
-                            .on_hover_text("VNC passwords are limited to 8 characters by the protocol.");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.vnc_secret)
+                                .password(true)
+                                .hint_text(hint)
+                                .desired_width(260.0),
+                        )
+                        .on_hover_text("VNC passwords are limited to 8 characters by the protocol.");
                     });
                 });
                 if !v.via_ssh {
                     ui.label(
-                        RichText::new("Direct VNC is unencrypted; fine on a trusted LAN, otherwise prefer the SSH tunnel.")
-                            .weak()
-                            .small(),
+                        RichText::new(
+                            "Direct VNC is unencrypted; fine on a trusted LAN, otherwise prefer the SSH tunnel.",
+                        )
+                        .weak()
+                        .small(),
                     );
                 }
             });
@@ -398,7 +423,14 @@ pub struct PasswordDialog {
 
 impl PasswordDialog {
     pub fn own() -> Self {
-        PasswordDialog { user_id: None, target: String::new(), old: String::new(), new: String::new(), confirm: String::new(), error: None }
+        PasswordDialog {
+            user_id: None,
+            target: String::new(),
+            old: String::new(),
+            new: String::new(),
+            confirm: String::new(),
+            error: None,
+        }
     }
 
     pub fn reset(user: &User) -> Self {

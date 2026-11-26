@@ -17,9 +17,7 @@ pub fn hash_password(password: &str) -> Result<String> {
 
 pub fn verify_password(password: &str, hash: &str) -> bool {
     match PasswordHash::new(hash) {
-        Ok(parsed) => Argon2::default()
-            .verify_password(password.as_bytes(), &parsed)
-            .is_ok(),
+        Ok(parsed) => Argon2::default().verify_password(password.as_bytes(), &parsed).is_ok(),
         Err(_) => false,
     }
 }
@@ -34,9 +32,7 @@ pub fn verify_dummy(password: &str) {
 
 pub fn validate_password(password: &str) -> Result<()> {
     if password.chars().count() < MIN_PASSWORD_LEN {
-        return Err(invalid(format!(
-            "password must be at least {MIN_PASSWORD_LEN} characters"
-        )));
+        return Err(invalid(format!("password must be at least {MIN_PASSWORD_LEN} characters")));
     }
     Ok(())
 }
@@ -44,13 +40,9 @@ pub fn validate_password(password: &str) -> Result<()> {
 pub fn validate_username(username: &str) -> Result<()> {
     let ok = !username.is_empty()
         && username.len() <= 32
-        && username
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'));
+        && username.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'));
     if !ok {
-        return Err(invalid(
-            "username must be 1-32 characters of letters, digits, '_', '-' or '.'",
-        ));
+        return Err(invalid("username must be 1-32 characters of letters, digits, '_', '-' or '.'"));
     }
     Ok(())
 }
