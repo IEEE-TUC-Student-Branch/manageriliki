@@ -7,7 +7,7 @@ license.workspace = true
 [dependencies]
 anyhow = "1.0.104"
 chrono = "0.4.45"
-eframe = "0.36.2"
+eframe = "0.37.0"
 manageriliki-core = { version = "0.1.0", path = "../core" }
 
 [dev-dependencies]
