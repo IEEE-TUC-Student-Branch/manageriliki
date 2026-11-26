@@ -11,4 +11,4 @@ eframe = "0.36.2"
 manageriliki-core = { version = "0.1.0", path = "../core" }
 
 [dev-dependencies]
-egui_kittest = { version = "0.36.2", features = ["eframe", "wgpu", "snapshot"] }
+egui_kittest = { version = "0.37.0", features = ["eframe", "wgpu", "snapshot"] }
